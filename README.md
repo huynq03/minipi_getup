@@ -16,6 +16,8 @@ from MuJoCo Playground). Only the Mini-Pi task is included.
   ± 0.025 rad noise, zero velocity. Actions are held for 0.2 s after reset.
 - Action: 12-D relative joint-position targets (scale 0.6), PD actuators capped at
   ±16 Nm.
+- No curricula (discovery stage): action_rate_l2 stays -0.01, joint_vel_l2 stays 0, and
+  the energy termination stays at an inf threshold (no measured Mini-Pi power limits).
 - Simulation: 2 ms physics step, 50 Hz policy, 6 s episodes.
 - Observations: actor 42-D (base angular velocity, projected gravity, joint positions,
   joint velocities, last action); critic 45-D (adds base linear velocity).
@@ -30,10 +32,9 @@ uv run play Mjlab-Getup-Flat-MiniPi
 
 ## Dependencies
 
-mjlab and mujoco_warp are pinned to the same commits as `mjlab_playground`
-(mjlab 1.2.0 @ `f7fdb16`, mujoco_warp 3.6.0 @ `875c4ca`). MuJoCo is the stable PyPI
-release 3.7.0 rather than the py.mujoco.org nightly that mjlab's own sources point to,
-because those nightly wheels are no longer hosted.
+`mjlab[cu128]==1.6.0` from PyPI, which brings MuJoCo 3.11, MuJoCo Warp 3.11 and
+RSL-RL 5.4.2. On Linux x86_64, `warp-lang` comes from NVIDIA's CUDA 12 release wheel
+(`1.18.0+cu12`) because the PyPI wheels are CUDA 13 builds that need a 580+ driver.
 
 ## Layout
 

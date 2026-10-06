@@ -7,7 +7,6 @@ import math
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
-from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -21,11 +20,10 @@ from minipi_getup.getup.getup_env_cfg import make_getup_env_cfg
 from minipi_getup.getup.mdp.actions import SettleRelativeJointPositionActionCfg
 
 # Measured by settling the home keyframe (all joints 0) on flat ground. base_link is
-# the single torso body; its origin sits on the hip line. Mini-Pi has no pelvis link,
-# so the pelvis height is the mean of the two hip joint centers (hip_pitch_link
-# origins, 33 mm below the base origin).
+# the single torso body; its origin sits on the hip line. There is no separate pelvis
+# height reward: the hip_pitch_link origins are rigidly 33 mm below base_link, so it
+# would duplicate torso_height.
 _TORSO_HEIGHT = 0.344
-_PELVIS_HEIGHT = 0.311
 
 # Fixed supine start: legs in the nominal stance shape, lying on the back. Measured at
 # rest: the robot lies on the rear torso capsule and both heels, pitched -88.3 deg
@@ -67,26 +65,17 @@ def minipi_getup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.scene.sensors = (cfg.scene.sensors or ()) + (self_collision_cfg,)
 
-  # Weak: counts up to 10 substeps, so -0.04 matches T1's -0.1 over 4 substeps.
+  # Very weak (counts up to 10 substeps): without arms, Mini-Pi may need torso, shin
+  # and knee contacts while getting up.
   cfg.rewards["self_collisions"] = RewardTermCfg(
     func=mdp.self_collision_cost,
-    weight=-0.04,
+    weight=-0.01,
     params={"sensor_name": self_collision_cfg.name},
   )
 
   cfg.rewards["torso_height"].params["desired_height"] = _TORSO_HEIGHT
   cfg.rewards["torso_height"].params["asset_cfg"] = SceneEntityCfg(
     "robot", body_names=("base_link",)
-  )
-  cfg.rewards["pelvis_height"] = RewardTermCfg(
-    func=mdp.height_reward,
-    weight=1.0,
-    params={
-      "desired_height": _PELVIS_HEIGHT,
-      "asset_cfg": SceneEntityCfg(
-        "robot", body_names=("l_hip_pitch_link", "r_hip_pitch_link")
-      ),
-    },
   )
   cfg.metrics["getup_success"].params["desired_height"] = _TORSO_HEIGHT
 
@@ -136,47 +125,11 @@ def minipi_getup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.actions["joint_pos"].settle_steps = 10  # 0.2s at 50Hz action rate.
   cfg.terminations["energy"].params["settle_steps"] = 10
 
-  # Same schedule as T1: free exploration first, then smoother/cheaper motion. Energy
-  # thresholds (W) are T1's scaled by mass (6.9 kg vs ~30 kg).
-  cfg.curriculum = {
-    "action_rate_weight": CurriculumTermCfg(
-      func=mdp.reward_curriculum,
-      params={
-        "reward_name": "action_rate_l2",
-        "stages": [
-          {"step": 0, "weight": -0.01},
-          {"step": 600 * 24, "weight": -0.05},
-          {"step": 900 * 24, "weight": -0.08},
-          {"step": 1200 * 24, "weight": -0.1},
-        ],
-      },
-    ),
-    "joint_vel_weight": CurriculumTermCfg(
-      func=mdp.reward_curriculum,
-      params={
-        "reward_name": "joint_vel_l2",
-        "stages": [
-          {"step": 0, "weight": 0.0},
-          {"step": 900 * 24, "weight": -0.005},
-          {"step": 1200 * 24, "weight": -0.008},
-          {"step": 1500 * 24, "weight": -0.01},
-        ],
-      },
-    ),
-    "energy_threshold": CurriculumTermCfg(
-      func=mdp.termination_curriculum,
-      params={
-        "termination_name": "energy",
-        "stages": [
-          {"step": 900 * 24, "params": {"threshold": 700.0}},
-          {"step": 1200 * 24, "params": {"threshold": 460.0}},
-          {"step": 1500 * 24, "params": {"threshold": 350.0}},
-          {"step": 1700 * 24, "params": {"threshold": 230.0}},
-          {"step": 2200 * 24, "params": {"threshold": 160.0}},
-        ],
-      },
-    ),
-  }
+  # Discovery stage: no curriculum. action_rate_l2 stays -0.01 and joint_vel_l2 stays
+  # 0 so aggressive exploratory motion is not discouraged early. No energy threshold
+  # curriculum either (T1's power limits scaled by mass are guesses, not measured
+  # Mini-Pi limits), so the energy termination stays at its inert inf threshold.
+  cfg.curriculum = {}
 
   if play:
     cfg.observations["actor"].enable_corruption = False

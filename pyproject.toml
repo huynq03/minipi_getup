@@ -3,48 +3,31 @@ name = "minipi-getup"
 version = "0.1.0"
 description = "HighTorque Mini-Pi getup task for mjlab"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "mjlab[cu128]",
+    "mjlab[cu128]==1.6.0",
     "torch>=2.7.0,<2.10.0",
+    # Pinned as a direct dependency only so the CUDA 12 wheel source below applies.
+    "warp-lang==1.18.0",
 ]
 
 [build-system]
 requires = ["uv_build>=0.8.18,<0.9.0"]
 build-backend = "uv_build"
 
-# Same mjlab and mujoco_warp commits as mjlab_playground. MuJoCo comes from the stable
-# PyPI release instead of the py.mujoco.org nightly index that mjlab's own sources point
-# to (those nightly wheels are no longer hosted).
+# PyPI warp-lang wheels are CUDA 13 builds and need a CUDA 13 driver (>= 580). NVIDIA
+# publishes CUDA 12 builds only as GitHub release assets; use them on Linux x86_64 so
+# the 550-series (CUDA 12.4) driver works.
 [tool.uv.sources]
-mjlab = { git = "https://github.com/mujocolab/mjlab", rev = "f7fdb163b590e980865e59a5633ff5e1143553bd" }
-mujoco-warp = { git = "https://github.com/google-deepmind/mujoco_warp", rev = "875c4caf06d71b12b2036c327e7a07ce08a78b9a" }
-warp-lang = { index = "nvidia", marker = "sys_platform != 'darwin'" }
+warp-lang = [
+  { url = "https://github.com/NVIDIA/warp/releases/download/v1.18.0/warp_lang-1.18.0+cu12-py3-none-manylinux_2_28_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
 torch = [
   { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" },
 ]
 
-[tool.uv]
-# Resolve as of mjlab_playground's lock (2026-04-05, same day as the mjlab commit) so
-# transitive versions match the validated stack. MuJoCo 3.7.0 is the stable release of
-# the 3.7.0 nightly line mjlab_playground used, published 2026-04-14.
-exclude-newer = "2026-04-05T16:00:00Z"
-# warp-lang and torch come from indexes without upload dates; they are bounded by version.
-exclude-newer-package = { mujoco = "2026-04-15T00:00:00Z", warp-lang = false, torch = false }
-# Ignore mjlab's own `mujoco = { index = "mujoco" }` source (nightly index).
-no-sources-package = ["mujoco"]
-constraint-dependencies = [
-    "mujoco==3.7.0",
-    "warp-lang==1.12.0",
-]
-
 [[tool.uv.index]]
 url = "https://pypi.org/simple"
-
-[[tool.uv.index]]
-name = "nvidia"
-url = "https://pypi.nvidia.com/"
-explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
