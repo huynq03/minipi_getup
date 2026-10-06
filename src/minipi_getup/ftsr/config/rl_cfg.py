@@ -66,6 +66,6 @@ def ftsr_runner_cfg() -> FtsrRunnerCfg:
 
 def ftsr_walk_runner_cfg() -> FtsrRunnerCfg:
   cfg = ftsr_runner_cfg()
-  cfg.max_iterations = 200
+  cfg.max_iterations = 400
   cfg.save_interval = 25
   return cfg

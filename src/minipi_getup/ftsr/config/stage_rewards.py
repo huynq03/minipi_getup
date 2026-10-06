@@ -8,8 +8,11 @@ Adaptations to Mini-Pi (see docs/FTSR_REPRODUCTION_AUDIT.md, Sec. 4):
 - Kernel widths that are lengths scale with the robot. JiaRan's stance is 0.75 m,
   Mini-Pi's 0.345 m, so the height kernel exp(-8.3 dh^2) becomes
   exp(-8.3 (0.75/0.345)^2 dh^2) = exp(-39 dh^2).
-- Velocity kernels follow Froude scaling (v ~ sqrt(L)): exp(-8.3 x 0.75/0.345 dv^2) =
-  exp(-18 dv^2). The yaw-rate kernel keeps 8.3: rad/s doesn't depend on size.
+- Linear-velocity kernel: exp(-25 dv^2) (std 0.2 m/s, as in the tuned Mini-Pi
+  velocity task). The first pretraining (ftsr_pretrain_rw_v1) used the Froude-scaled
+  exp(-18 dv^2). With it, standing still under a 0.2-0.3 m/s command kept half the
+  tracking reward, and the policy stood instead of walking. The yaw-rate kernel keeps
+  8.3: rad/s doesn't depend on size.
 - Torque-type penalties (|tau|^2 and |qdot tau|^2) are multiplied by (6)^2 = 36.
   JiaRan's joints (kp ~100, action scale 0.6) run at roughly 6x Mini-Pi's torques in
   its 9 Nm envelope. Table II's 1e-6 would otherwise vanish on a 9 Nm robot, where on
@@ -29,7 +32,7 @@ from minipi_getup.ftsr.config.robot import STANCE_HEIGHT
 STAGE_HEIGHTS = (0.19, 0.30, 0.335)
 
 HEIGHT_KERNEL = 8.3 * (0.75 / STANCE_HEIGHT) ** 2
-LIN_VEL_KERNEL = 8.3 * (0.75 / STANCE_HEIGHT)
+LIN_VEL_KERNEL = 1.0 / 0.2**2
 ANG_VEL_KERNEL = 8.3
 TORQUE_SCALE = 36.0
 # Tracking rewards only count once the torso is up (released: 0.6 of 0.75 m).
@@ -54,7 +57,8 @@ STAGE_WEIGHTS: dict[str, tuple[float, float, float]] = {
   "leg_bias": (-2.0, -0.02, 0.0),
   "no_fly": (-2.0, 0.0, -0.2),
   "feet_support": (4.0, 0.0, 0.0),
-  "feet_air_time": (0.0, 0.0, 1.0),
+  # 1.0 in ftsr_pretrain_rw_v1 (no stepping emerged); 2.0 since v2.
+  "feet_air_time": (0.0, 0.0, 2.0),
   "feet_slip": (0.0, 0.0, -0.1),
   # Not in Table II (released code's pen_torque_limits); off in the faithful baseline.
   "torque_limit": (0.0, 0.0, 0.0),
