@@ -56,9 +56,14 @@ from minipi_getup.getup.mdp.force_guidance import low_for_too_long
 
 STEPS_PER_ITERATION = 24
 
-# Relative joint-position action: q_target = q + ACTION_SCALE * a. The peak P torque
-# per unit action is kp * 0.13 (5.5 Nm at kp 42).
-ACTION_SCALE = 0.13
+# Absolute joint-position action (paper form): q_target = q_default + ACTION_SCALE * a,
+# latched per policy step and clamped to the joint limits. The first design (relative
+# targets, q + 0.13 a) never learned to walk in three pretraining runs
+# (ftsr_pretrain_rw_v1-v3). Absolute 0.13 didn't walk in 300 iterations either;
+# absolute 0.25 did (diag_walk_absolute*, see the experiment log). Torque safety comes
+# from the 9 Nm actuator envelope, not from the scale.
+ACTION_SCALE = 0.25
+ACTION_RELATIVE = False
 SETTLE_STEPS = 25  # 0.5 s with actions (and assist) held after a fallen reset.
 EPISODE_LENGTH_S = 20.0  # As getup_gym.
 # Gait clock period (s) of the walking stage, from the tuned Mini-Pi velocity task.
@@ -342,6 +347,7 @@ def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
         entity_name="robot",
         actuator_names=(".*",),
         scale=ACTION_SCALE,
+        relative=ACTION_RELATIVE,
         settle_steps=SETTLE_STEPS,
         operational_torque_limit=OPERATIONAL_TORQUE_LIMIT,
       )

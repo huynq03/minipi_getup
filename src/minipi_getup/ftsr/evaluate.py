@@ -76,7 +76,14 @@ class _SplitMonitor:
     self.walking.clear()
 
 
-def _build(task: str, num_envs: int, device: str, seed: int):
+def _build(
+  task: str,
+  num_envs: int,
+  device: str,
+  seed: int,
+  action_relative: bool | None = None,
+  action_scale: float | None = None,
+):
   import mjlab.tasks  # noqa: F401
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.rl import RslRlVecEnvWrapper
@@ -95,6 +102,10 @@ def _build(task: str, num_envs: int, device: str, seed: int):
     assert FALLEN_POSE_NAMES == POSES
     cfg.events["reset_pose"].params["poses"] = tuple(FALLEN_POSES[p] for p in POSES)
     cfg.events["reset_pose"].params["by_env_index"] = True
+  if action_relative is not None:
+    cfg.actions["joint_pos"].relative = action_relative
+  if action_scale is not None:
+    cfg.actions["joint_pos"].scale = action_scale
   twist = cfg.commands["twist"]
   twist.resampling_time_range = (1e6, 1e6)
   twist.rel_standing_envs = 0.0
@@ -342,10 +353,15 @@ def main() -> None:
   ap.add_argument("--run-name", default="")
   ap.add_argument("--out", default="logs/ftsr_analysis/results.csv")
   ap.add_argument("--device", default="cuda:0")
+  ap.add_argument("--action-relative", choices=("true", "false"), default=None)
+  ap.add_argument("--action-scale", type=float, default=None)
   args = ap.parse_args()
 
   seconds = args.seconds or (20.0 if args.task == "recovery" else 10.0)
-  env, wrapped, runner = _build(args.task, args.envs, args.device, args.seeds[0])
+  rel = None if args.action_relative is None else args.action_relative == "true"
+  env, wrapped, runner = _build(
+    args.task, args.envs, args.device, args.seeds[0], rel, args.action_scale
+  )
   steps = int(round(seconds / env.step_dt))
   os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
   rows = []

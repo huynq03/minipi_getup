@@ -58,14 +58,15 @@ def ftsr_runner_cfg() -> FtsrRunnerCfg:
     num_steps_per_env=24,
     max_iterations=8000,
     save_interval=50,
-    # Bounds the per-step target offset to 4 x 0.13 rad.
-    clip_actions=4.0,
+    # |a| <= 7 lets absolute targets reach +-1.75 rad around the stance (the hip
+    # pitch and knee ranges needed to get up). The paper's code clips at 50.
+    clip_actions=7.0,
     seed=42,
   )
 
 
 def ftsr_walk_runner_cfg() -> FtsrRunnerCfg:
   cfg = ftsr_runner_cfg()
-  cfg.max_iterations = 400
+  cfg.max_iterations = 300
   cfg.save_interval = 25
   return cfg

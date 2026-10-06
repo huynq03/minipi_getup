@@ -1,11 +1,12 @@
-"""Hardware-consistent relative joint-position action with a torque monitor.
+"""Hardware-consistent joint-position action with a torque monitor.
 
-``q_target = clamp(q(t_k) + scale * a_k, joint limits)`` is latched once per policy
-step and held for all physics substeps, as a motor driver holding a 50 Hz position
-target would. (The baseline task's ``SettleRelativeJointPositionAction`` re-adds the
-offset to the current position at every 2 ms substep, which keeps a constant P push
-that real hardware wouldn't produce.) The peak P torque of a step is therefore
-``kp * scale * |a|`` at its first substep, and the operational effort limit caps it.
+The target, ``q_default + scale * a_k`` (absolute, the paper's form, the default) or
+``q(t_k) + scale * a_k`` (relative), is clamped to the joint limits. It is latched
+once per policy step and held for all physics substeps, as a motor driver holding a
+50 Hz position target would. (The baseline task's
+``SettleRelativeJointPositionAction`` re-adds the offset to the current position at
+every 2 ms substep, which keeps a constant P push that real hardware wouldn't
+produce.) The operational effort limit caps the PD torque.
 
 While a freshly reset env settles (``settle_steps``, marked by the reset event in
 ``env.extras["settle_mask"]``), the target holds the current pose and the policy
@@ -97,6 +98,9 @@ class FtsrJointPositionActionCfg(RelativeJointPositionActionCfg):
   settle_steps: int = 0
   """Env steps after a marked reset during which the current pose is held."""
 
+  relative: bool = True
+  """True: q_target = q + scale * a. False: q_target = q_default + scale * a (paper)."""
+
   operational_torque_limit: float = 9.0
   """Effort envelope used for the saturation statistic (|tau| >= 0.9 x limit)."""
 
@@ -117,7 +121,11 @@ class FtsrJointPositionAction(RelativeJointPositionAction):
   def process_actions(self, actions: torch.Tensor) -> None:
     super().process_actions(actions)
     q = self._entity.data.joint_pos[:, self._target_ids]
-    target = q + self._processed_actions
+    if self.cfg.relative:
+      target = q + self._processed_actions
+    else:
+      default = self._entity.data.default_joint_pos[:, self._target_ids]
+      target = default + self._processed_actions
     if self.cfg.settle_steps > 0:
       in_window = self._env.episode_length_buf < self.cfg.settle_steps
       marked = self._env.extras.get("settle_mask", in_window)
