@@ -347,6 +347,27 @@ def summarize(results: list[dict], task: str) -> dict:
   return row
 
 
+def append_rows(path: str, rows: list[dict]) -> None:
+  """Append rows to a CSV, widening its header when new columns appear.
+
+  Columns depend on the outcome (``walking_*`` only once some robot walks), so the
+  file is rewritten with the union of all fields.
+  """
+  old: list[dict] = []
+  fields: list[str] = []
+  if os.path.exists(path):
+    with open(path, newline="") as f:
+      reader = csv.DictReader(f)
+      fields = list(reader.fieldnames or [])
+      old = list(reader)
+  for row in rows:
+    fields += [k for k in row if k not in fields]
+  with open(path, "w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=fields, restval="")
+    w.writeheader()
+    w.writerows(old + rows)
+
+
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--checkpoints", nargs="+", required=True)
@@ -411,20 +432,7 @@ def main() -> None:
         {k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items()}
       )
     )
-  write_header = not os.path.exists(args.out)
-  keys = list(rows[0].keys())
-  if not write_header:
-    with open(args.out) as f:
-      old = next(csv.reader(f), [])
-    if old != keys:
-      base, ext = os.path.splitext(args.out)
-      args.out = f"{base}_{args.task}{ext}"
-      write_header = not os.path.exists(args.out)
-  with open(args.out, "a", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=keys)
-    if write_header:
-      w.writeheader()
-    w.writerows(rows)
+  append_rows(args.out, rows)
   print(f"wrote {len(rows)} rows to {args.out}")
   env.close()
 
