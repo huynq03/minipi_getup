@@ -120,6 +120,8 @@ def run_episode(env, wrapped, policy, seed: int, task: str, steps: int) -> dict:
   n, dev = env.num_envs, env.device
   obs, _ = wrapped.reset()
   cmds = _set_commands(env)
+  # compute() returns the cached buffer unless forced; recompute with the new commands.
+  env.observation_manager._obs_buffer = None
   obs = wrapped.get_observations()
   robot = env.scene["robot"]
   term = env.action_manager.get_term("joint_pos")

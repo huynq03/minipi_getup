@@ -22,8 +22,8 @@ Adaptations to Mini-Pi (see docs/FTSR_REPRODUCTION_AUDIT.md, Sec. 4):
 - "Wheel force" becomes foot support force (feet carrying the body weight).
 - An upside-down indicator joins the |g_xy| orientation term (released code's
   ``pen_base_orientation_z_l2``): |g_xy| is 0 both upright and inverted.
-- Walking adds two legged-gait terms that the wheeled robot didn't need: feet air time
-  and feet slip.
+- Walking adds legged-gait terms that the wheeled robot didn't need: feet air time,
+  feet slip, and a gait-clock contact reward (``feet_gait``, with the clock in o_t).
 """
 
 from minipi_getup.ftsr.config.robot import STANCE_HEIGHT
@@ -60,6 +60,9 @@ STAGE_WEIGHTS: dict[str, tuple[float, float, float]] = {
   # 1.0 in ftsr_pretrain_rw_v1 (no stepping emerged); 2.0 since v2.
   "feet_air_time": (0.0, 0.0, 2.0),
   "feet_slip": (0.0, 0.0, -0.1),
+  # Legged gait clock reward (not in Table II); added after ftsr_pretrain_rw_v1/v2
+  # converged to standing still.
+  "feet_gait": (0.0, 0.0, 1.5),
   # Not in Table II (released code's pen_torque_limits); off in the faithful baseline.
   "torque_limit": (0.0, 0.0, 0.0),
 }

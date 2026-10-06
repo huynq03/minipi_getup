@@ -9,12 +9,13 @@
 
 Observation groups (dimensions for Mini-Pi's 12 joints):
 
-- ``actor``: o_t (45) = ang vel 3, projected gravity 3, command 3, joint pos 12,
-  joint vel 12, last action 12. Paper: o_t in R^34 for 8 DOF.
-- ``student``: o_{t:t-4}, the last H = 5 o_t (225), term-major.
+- ``actor``: o_t (47) = ang vel 3, projected gravity 3, command 3, gait phase 2,
+  joint pos 12, joint vel 12, last action 12. Paper: o_t in R^34 for 8 DOF, no
+  gait phase (a wheeled robot needs no gait clock).
+- ``student``: o_{t:t-4}, the last H = 5 o_t (235), term-major.
 - ``teacher``: x_t (36) = foot contact forces 6, torso height 1, root quat 4, root
   lin vel 3, root ang vel 3, body heights 13, assist wrench 6.
-- ``critic``: s_t (49) = noise-free o_t 45, base lin vel 3, torso height 1. Flat
+- ``critic``: s_t (51) = noise-free o_t 47, base lin vel 3, torso height 1. Flat
   ground, so no height map.
 """
 
@@ -60,6 +61,8 @@ STEPS_PER_ITERATION = 24
 ACTION_SCALE = 0.13
 SETTLE_STEPS = 25  # 0.5 s with actions (and assist) held after a fallen reset.
 EPISODE_LENGTH_S = 20.0  # As getup_gym.
+# Gait clock period (s) of the walking stage, from the tuned Mini-Pi velocity task.
+GAIT_PERIOD = 0.5
 
 # Eq. 4 assistance, scaled to Mini-Pi (audit Sec. 3):
 # - F_max = 0.75 m g: never the whole weight, so even at full strength the legs must
@@ -102,6 +105,10 @@ def _observations() -> dict[str, ObservationGroupCfg]:
         func=mdp.generated_commands,
         params={"command_name": "twist"},
         scale=(2.0, 2.0, 0.25),
+      ),
+      "gait_phase": ObservationTermCfg(
+        func=mdp.gait_phase,
+        params={"period": GAIT_PERIOD, "command_name": "twist"},
       ),
       "joint_pos": ObservationTermCfg(
         func=mdp.joint_pos_rel, noise=n(0.03), params={"biased": noisy}
@@ -223,6 +230,18 @@ def _rewards() -> dict[str, RewardTermCfg]:
         "command_name": "twist",
         "command_threshold": 0.1,
         "asset_cfg": _FEET_SITES,
+      },
+    ),
+    "feet_gait": RewardTermCfg(
+      func=mdp.feet_gait,
+      weight=0.0,
+      params={
+        "sensor_name": _FEET_SENSOR,
+        "period": GAIT_PERIOD,
+        "offset": (0.0, 0.5),
+        "stance_fraction": 0.55,
+        "command_name": "twist",
+        "command_threshold": 0.1,
       },
     ),
     "torque_limit": RewardTermCfg(

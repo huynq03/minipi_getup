@@ -232,3 +232,29 @@ def fell_over(
   asset: Entity = env.scene[asset_cfg.name]
   up = (-asset.data.projected_gravity_b[:, 2]).clamp(-1.0, 1.0)
   return (_torso_height(env, asset_cfg) < min_height) | (torch.acos(up) > max_tilt)
+
+
+def feet_gait(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  period: float,
+  offset: tuple[float, ...],
+  stance_fraction: float,
+  command_name: str,
+  command_threshold: float = 0.1,
+) -> torch.Tensor:
+  """Share of feet whose contact state matches the gait clock (walking stage only).
+
+  Foot ``j`` should be in stance while ``(t / period + offset_j) % 1 < stance_fraction``
+  and in swing otherwise. Zero for stand commands. Same clock as ``gait_phase``.
+  """
+  sensor: ContactSensor = env.scene[sensor_name]
+  assert sensor.data.current_contact_time is not None
+  contact = sensor.data.current_contact_time > 0
+  t = (env.episode_length_buf * env.step_dt / period).unsqueeze(-1)
+  offs = torch.as_tensor(offset, device=env.device, dtype=t.dtype)
+  stance = (t + offs) % 1.0 < stance_fraction
+  reward = (stance == contact).float().mean(dim=-1)
+  cmd = env.command_manager.get_command(command_name)
+  assert cmd is not None
+  return reward * (torch.linalg.norm(cmd, dim=-1) > command_threshold).float()

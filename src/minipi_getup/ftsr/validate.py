@@ -55,8 +55,8 @@ def main(num_envs: int = 64, device: str = "cuda:0") -> None:
   dims = {k: v.shape[-1] for k, v in obs.items()}
   print("obs dims", dims)
   _check(
-    dims == {"actor": 45, "student": 225, "teacher": 36, "critic": 49},
-    "observation dims (actor 45, student 5x45, teacher 36, critic 49)",
+    dims == {"actor": 47, "student": 235, "teacher": 36, "critic": 51},
+    "observation dims (actor 47, student 5x47, teacher 36, critic 51)",
   )
 
   # 3. Settle window: no force; afterwards a finite upward force on lying robots.

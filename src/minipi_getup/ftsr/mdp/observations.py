@@ -53,3 +53,23 @@ def assist_wrench(
   """Eq. 4 wrench for the next step, normalized by its maxima (privileged)."""
   w = get_wrench(env)
   return torch.cat((w[:, :3] * force_scale, w[:, 3:] * torque_scale), dim=-1)
+
+
+def gait_phase(
+  env: ManagerBasedRlEnv,
+  period: float,
+  command_name: str,
+  command_threshold: float = 0.1,
+) -> torch.Tensor:
+  """Gait clock [sin, cos] of the episode time, zero for stand commands.
+
+  Not in the paper's o_t: a wheeled robot needs no gait. For the legged Mini-Pi the
+  walking stage pairs it with ``feet_gait`` (as the tuned Mini-Pi velocity task does);
+  without it the r_w pretraining converged to standing still (ftsr_pretrain_rw_v1/v2).
+  """
+  phase = (env.episode_length_buf * env.step_dt) % period / period * 2.0 * torch.pi
+  clock = torch.stack((torch.sin(phase), torch.cos(phase)), dim=-1)
+  cmd = env.command_manager.get_command(command_name)
+  assert cmd is not None
+  stand = torch.linalg.norm(cmd, dim=-1, keepdim=True) <= command_threshold
+  return torch.where(stand, torch.zeros_like(clock), clock)
