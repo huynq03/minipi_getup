@@ -1,0 +1,132 @@
+<mujoco model="clpai_12dof_0905">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+
+  <default>
+    <default class="minipi">
+      <default class="visual">
+        <geom group="2" type="mesh" density="0" rgba="0.75294 0.75294 0.75294 1" contype="0" conaffinity="0"/>
+      </default>
+      <default class="collision">
+        <geom group="3" rgba=".2 .6 .2 .3" type="capsule" contype="1" conaffinity="1"/>
+        <default class="foot_capsule">
+          <geom type="capsule" size="0.005"/>
+        </default>
+      </default>
+      <site group="5" rgba="1 0 0 1"/>
+    </default>
+  </default>
+
+  <statistic meansize="0.0952037" extent="0.669965" center="0.00100425 1.88733e-05 -0.106907"/>
+  <asset>
+    <mesh name="baselink_1" file="baselink_1.STL"/>
+    <mesh name="r_hip_pitch_link" file="r_hip_pitch_link.STL"/>
+    <mesh name="r_hip_roll_link" file="r_hip_roll_link.STL"/>
+    <mesh name="r_thigh_link" file="r_thigh_link.STL"/>
+    <mesh name="r_calf_link" file="r_calf_link.STL"/>
+    <mesh name="r_ankle_pitch_link" file="r_ankle_pitch_link.STL"/>
+    <mesh name="r_ankle_roll_link" file="r_ankle_roll_link.STL"/>
+    <mesh name="l_hip_pitch_link" file="l_hip_pitch_link.STL"/>
+    <mesh name="l_hip_roll_link" file="l_hip_roll_link.STL"/>
+    <mesh name="l_thigh_link" file="l_thigh_link.STL"/>
+    <mesh name="l_calf_link" file="l_calf_link.STL"/>
+    <mesh name="l_ankle_pitch_link" file="l_ankle_pitch_link.STL"/>
+    <mesh name="l_ankle_roll_link" file="l_ankle_roll_link.STL"/>
+  </asset>
+  <worldbody>
+    <body name="base_link" childclass="minipi">
+      <inertial pos="0.00242324 -5.699e-05 0.0403008" quat="0.695312 0.00968645 0.00943283 0.718581" mass="2.1609" diaginertia="0.00978249 0.00901239 0.00416199"/>
+      <joint name="base_link_free_joint" type="free"/>
+      <geom class="visual" rgba="1 1 1 1" mesh="baselink_1"/>
+      <geom name="base1_collision" class="collision" size="0.05" fromto="0.036 0 0.046 0.036 0 0.107"/>
+      <geom name="base2_collision" class="collision" size="0.05" fromto="-0.036 0 0.046 -0.036 0 0.107"/>
+      <!-- Reference-frame IMU at the base origin, as in HighTorque's pai_12dof.xml. Not a
+           verified physical mounting position. -->
+      <site name="imu" size="0.01" pos="0 0 0"/>
+      <body name="r_hip_pitch_link" pos="-5.1979e-05 -0.0233 -0.033" quat="0.992198 0 -0.124675 0">
+        <inertial pos="0.00089428 -0.0552774 -0.00027276" quat="-0.0190163 0.705972 -0.0283274 0.707417" mass="0.369998" diaginertia="0.000108547 9.80557e-05 8.30673e-05"/>
+        <joint name="r_hip_pitch_joint" pos="0 0 0" axis="0 1 0" range="-1.25 1.75"/>
+        <geom class="visual" mesh="r_hip_pitch_link"/>
+        <body name="r_hip_roll_link" pos="0.00025 -0.0568 0">
+          <inertial pos="-0.00180153 0.00025956 -0.0608194" quat="0.705929 -0.0791259 -0.0825487 0.698992" mass="0.388516" diaginertia="0.000334209 0.00027814 0.000128441"/>
+          <joint name="r_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.5 0.12"/>
+          <geom class="visual" mesh="r_hip_roll_link"/>
+          <geom name="r_hip_collision" class="collision" size="0.03" fromto="0 0 -0.01 0 0 -0.0635"/>
+          <body name="r_thigh_link" pos="-0.00025 0 -0.06925">
+            <inertial pos="0 0.00116854 -0.047559" quat="0.73728 0.675588 0 0" mass="0.112709" diaginertia="0.00012496 9.46591e-05 5.79209e-05"/>
+            <joint name="r_thigh_joint" pos="0 0 0" axis="0 0 1" range="-0.6 0.3"/>
+            <geom class="visual" mesh="r_thigh_link"/>
+            <geom name="r_thigh_collision" class="collision" type="sphere" size="0.03" pos="0 0 -0.057"/>
+            <body name="r_calf_link" pos="0 -0.0027 -0.07025" quat="0.947651 0 0.319309 0">
+              <inertial pos="-0.00026627 -0.00116537 -0.0697121" quat="0.999984 -0.00311529 0.000122098 0.00472349" mass="0.813742" diaginertia="0.00352123 0.00349959 0.000174551"/>
+              <joint name="r_calf_joint" pos="0 0 0" axis="0 1 0" range="-0.65 1.65"/>
+              <geom class="visual" mesh="r_calf_link"/>
+              <geom name="r_calf_collision" class="collision" size="0.025" fromto="0 0.0022 0 0 0.0022 -0.14"/>
+              <body name="r_ankle_pitch_link" pos="0 0 -0.14" quat="0.980067 0 -0.198669 0">
+                <inertial pos="0.00467932 0.00347699 0" quat="0.00221869 0.707103 -0.00221869 0.707103" mass="0.175924" diaginertia="0.00030766 0.000221794 0.000119806"/>
+                <joint name="r_ankle_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.5 1.3"/>
+                <geom class="visual" mesh="r_ankle_pitch_link"/>
+                <body name="r_ankle_roll_link" pos="0.07525 0.0027 0">
+                  <inertial pos="-0.0238368 0.00019256 -0.0144649" quat="0.5599 0.43068 0.434161 0.559045" mass="0.518685" diaginertia="0.00113169 0.00103133 0.000283273"/>
+                  <joint name="r_ankle_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.3 0.8"/>
+                  <geom class="visual" mesh="r_ankle_roll_link"/>
+                  <geom name="r_foot1_collision" class="foot_capsule" fromto="0.026 -0.029 -0.043 -0.129 -0.0233 -0.043"/>
+                  <geom name="r_foot2_collision" class="foot_capsule" fromto="0.026 -0.0145 -0.043 -0.129 -0.01165 -0.043"/>
+                  <geom name="r_foot3_collision" class="foot_capsule" fromto="0.026 0 -0.043 -0.129 0 -0.043"/>
+                  <geom name="r_foot4_collision" class="foot_capsule" fromto="0.026 0.0145 -0.043 -0.129 0.01165 -0.043"/>
+                  <geom name="r_foot5_collision" class="foot_capsule" fromto="0.026 0.029 -0.043 -0.129 0.0233 -0.043"/>
+                  <site name="r_foot" pos="-0.0514 0 -0.048"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="l_hip_pitch_link" pos="-5.1979e-05 0.0233 -0.033" quat="0.992198 0 -0.124675 0">
+        <inertial pos="0.00086268 0.0544191 -0.00025859" quat="-0.0385995 0.705608 0.0295548 0.706932" mass="0.389686" diaginertia="0.000128344 0.000105107 0.000100719"/>
+        <joint name="l_hip_pitch_joint" pos="0 0 0" axis="0 1 0" range="-1.25 1.75"/>
+        <geom class="visual" mesh="l_hip_pitch_link"/>
+        <body name="l_hip_roll_link" pos="0 0.0568 0">
+          <inertial pos="-0.00207707 0.00026598 -0.0608194" quat="0.699248 -0.0752466 -0.0779987 0.706616" mass="0.388516" diaginertia="0.000333211 0.000277592 0.000128507"/>
+          <joint name="l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 0.5"/>
+          <geom class="visual" mesh="l_hip_roll_link"/>
+          <geom name="l_hip_collision" class="collision" size="0.03" fromto="0 0 -0.01 0 0 -0.0635"/>
+          <body name="l_thigh_link" pos="0 0 -0.06925">
+            <inertial pos="0 -0.00115822 -0.047559" quat="0.67539 0.737461 0 0" mass="0.112709" diaginertia="0.00012497 9.46626e-05 5.79174e-05"/>
+            <joint name="l_thigh_joint" pos="0 0 0" axis="0 0 1" range="-0.3 0.6"/>
+            <geom class="visual" mesh="l_thigh_link"/>
+            <geom name="l_thigh_collision" class="collision" type="sphere" size="0.03" pos="0 0 -0.057"/>
+            <body name="l_calf_link" pos="0 0 -0.07025" quat="0.947651 0 0.319309 0">
+              <inertial pos="0.00026627 0.00386537 -0.0697121" quat="0.999984 0.00311529 -0.000122098 0.00472349" mass="0.813742" diaginertia="0.00352123 0.00349959 0.000174551"/>
+              <joint name="l_calf_joint" pos="0 0 0" axis="0 1 0" range="-0.65 1.65"/>
+              <geom class="visual" mesh="l_calf_link"/>
+              <geom name="l_calf_collision" class="collision" size="0.025" fromto="0 0.0005 0 0 0.0005 -0.14"/>
+              <body name="l_ankle_pitch_link" pos="0 0 -0.14" quat="0.980067 0 -0.198669 0">
+                <inertial pos="0.00467932 -0.00077699 0" quat="-0.00221869 0.707103 0.00221869 0.707103" mass="0.175924" diaginertia="0.00030766 0.000221794 0.000119806"/>
+                <joint name="l_ankle_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.5 1.3"/>
+                <geom class="visual" mesh="l_ankle_pitch_link"/>
+                <body name="l_ankle_roll_link" pos="0.07525 0 0">
+                  <inertial pos="-0.0238368 0.00019256 -0.0144649" quat="0.5599 0.43068 0.434161 0.559045" mass="0.518685" diaginertia="0.00113169 0.00103133 0.000283273"/>
+                  <joint name="l_ankle_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.8 0.3"/>
+                  <geom class="visual" mesh="l_ankle_roll_link"/>
+                  <geom name="l_foot1_collision" class="foot_capsule" fromto="0.026 -0.029 -0.043 -0.129 -0.0233 -0.043"/>
+                  <geom name="l_foot2_collision" class="foot_capsule" fromto="0.026 -0.0145 -0.043 -0.129 -0.01165 -0.043"/>
+                  <geom name="l_foot3_collision" class="foot_capsule" fromto="0.026 0 -0.043 -0.129 0 -0.043"/>
+                  <geom name="l_foot4_collision" class="foot_capsule" fromto="0.026 0.0145 -0.043 -0.129 0.01165 -0.043"/>
+                  <geom name="l_foot5_collision" class="foot_capsule" fromto="0.026 0.029 -0.043 -0.129 0.0233 -0.043"/>
+                  <site name="l_foot" pos="-0.0514 0 -0.048"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <sensor>
+    <gyro name="imu_ang_vel" site="imu"/>
+    <velocimeter name="imu_lin_vel" site="imu"/>
+    <accelerometer name="imu_lin_acc" site="imu"/>
+    <framezaxis name="imu_upvector" objtype="body" objname="world" reftype="site" refname="imu"/>
+    <subtreeangmom name="root_angmom" body="base_link"/>
+  </sensor>
+</mujoco>
