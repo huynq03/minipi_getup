@@ -123,3 +123,48 @@ class getup_success:
     )
     self._stood_up = torch.maximum(self._stood_up, standing)
     return self._stood_up
+
+
+def base_yaw_rate_l2(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize base rotation about the world z axis (spinning in place)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  return torch.square(asset.data.root_link_ang_vel_w[:, 2])
+
+
+def upright_base_lin_vel_xy_l2(
+  env: ManagerBasedRlEnv,
+  orientation_threshold: float = 0.05,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize horizontal base drift (stepping, shuffling) once upright."""
+  asset: Entity = env.scene[asset_cfg.name]
+  gate = _is_upright(asset, orientation_threshold)
+  lin_vel_xy = asset.data.root_link_lin_vel_w[:, :2]
+  return gate * torch.sum(torch.square(lin_vel_xy), dim=-1)
+
+
+def hip_roll_open_when_low(
+  env: ManagerBasedRlEnv,
+  max_height: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward spreading the legs (hip roll toward its outward limit) while the torso is low.
+
+  The outward direction of each joint is the side of its range with the larger
+  magnitude. Returns the mean opening fraction in [0, 1], gated on the root height
+  being below ``max_height``.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  limits = asset.data.soft_joint_pos_limits
+  assert limits is not None
+  lower = limits[:, asset_cfg.joint_ids, 0]
+  upper = limits[:, asset_cfg.joint_ids, 1]
+  outward_limit = torch.where(lower.abs() > upper.abs(), lower, upper)
+  opening = (asset.data.joint_pos[:, asset_cfg.joint_ids] / outward_limit).clamp(
+    0.0, 1.0
+  )
+  gate = (asset.data.root_link_pos_w[:, 2] < max_height).float()
+  return gate * opening.mean(dim=-1)

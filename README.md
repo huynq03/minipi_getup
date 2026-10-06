@@ -16,9 +16,15 @@ from MuJoCo Playground). Only the Mini-Pi task is included.
   ± 0.025 rad noise, zero velocity. Actions are held for 0.2 s after reset.
 - Action: 12-D relative joint-position targets (scale 0.6), PD actuators capped at
   ±16 Nm.
-- No curricula (discovery stage): action_rate_l2 stays -0.01, joint_vel_l2 stays 0, and
-  the energy termination stays at an inf threshold (no measured Mini-Pi power limits).
-- Simulation: 2 ms physics step, 50 Hz policy, 6 s episodes.
+- Slow getup: penalties stay small while the getup is discovered, then ramp up.
+  action_rate_l2 goes -0.01 → -0.03 → -0.05 (iterations 400, 700) and joint_vel_l2
+  goes 0 → -0.002 → -0.005 → -0.01 (400, 700, 1000). The energy termination stays at
+  an inf threshold (no measured Mini-Pi power limits).
+- No spinning or shuffling: base yaw rate is penalized (-0.01 → -0.05 → -0.1 at 400,
+  700), and so is horizontal base velocity once upright.
+- Wide stance allowed: hip-roll posture std is 0.5 rad, and opening the hip roll toward
+  its outward limit is rewarded while the base is below 0.2 m.
+- Simulation: 2 ms physics step, 50 Hz policy, 10 s episodes.
 - Observations: actor 42-D (base angular velocity, projected gravity, joint positions,
   joint velocities, last action); critic 45-D (adds base linear velocity).
 

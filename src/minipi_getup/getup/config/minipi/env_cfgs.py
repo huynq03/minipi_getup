@@ -7,6 +7,7 @@ import math
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -79,15 +80,36 @@ def minipi_getup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.metrics["getup_success"].params["desired_height"] = _TORSO_HEIGHT
 
-  # Per-joint posture std (thigh_joint is the hip yaw, calf_joint is the knee).
+  # Per-joint posture std (thigh_joint is the hip yaw, calf_joint is the knee). Wide
+  # enough that a policy standing in a crouch still gets a gradient toward the default
+  # pose (at 0.08-0.2 the reward was ~exp(-30) = 0). hip_roll is nearly free so a wide
+  # stance is not penalized.
   cfg.rewards["posture"].params["std"] = {
-    r".*_hip_roll_joint": 0.08,
-    r".*_thigh_joint": 0.08,
-    r".*_hip_pitch_joint": 0.12,
-    r".*_calf_joint": 0.15,
-    r".*_ankle_pitch_joint": 0.2,
-    r".*_ankle_roll_joint": 0.2,
+    r".*_hip_roll_joint": 0.5,
+    r".*_thigh_joint": 0.2,
+    r".*_hip_pitch_joint": 0.3,
+    r".*_calf_joint": 0.4,
+    r".*_ankle_pitch_joint": 0.4,
+    r".*_ankle_roll_joint": 0.3,
   }
+
+  # No spinning in place: orientation, height and posture are all yaw-invariant.
+  # Weight ramps up in the curriculum below.
+  cfg.rewards["base_yaw_rate"] = RewardTermCfg(func=mdp.base_yaw_rate_l2, weight=-0.01)
+  # No stepping/shuffling once upright.
+  cfg.rewards["upright_base_drift"] = RewardTermCfg(
+    func=mdp.upright_base_lin_vel_xy_l2, weight=-1.0
+  )
+  # Encourage opening the legs (hip roll to its outward limit) while still low, before
+  # leaning the torso up.
+  cfg.rewards["hip_roll_open"] = RewardTermCfg(
+    func=mdp.hip_roll_open_when_low,
+    weight=0.3,
+    params={
+      "max_height": 0.2,
+      "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*_hip_roll_joint",)),
+    },
+  )
 
   cfg.viewer.body_name = "base_link"
   cfg.viewer.distance = 1.0
@@ -125,11 +147,49 @@ def minipi_getup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.actions["joint_pos"].settle_steps = 10  # 0.2s at 50Hz action rate.
   cfg.terminations["energy"].params["settle_steps"] = 10
 
-  # Discovery stage: no curriculum. action_rate_l2 stays -0.01 and joint_vel_l2 stays
-  # 0 so aggressive exploratory motion is not discouraged early. No energy threshold
-  # curriculum either (T1's power limits scaled by mass are guesses, not measured
-  # Mini-Pi limits), so the energy termination stays at its inert inf threshold.
-  cfg.curriculum = {}
+  # Slow, unhurried getup: 10 s episodes, and joint velocity / action rate / yaw rate
+  # penalties that stay small while the getup is discovered (a random policy flails, and
+  # full-strength penalties make lying still the best option), then ramp up. Steps are
+  # env steps (24 per iteration). No energy threshold curriculum (T1's power limits
+  # scaled by mass are guesses, not measured Mini-Pi limits), so the energy termination
+  # stays at its inert inf threshold.
+  cfg.episode_length_s = 10.0
+  cfg.curriculum = {
+    "action_rate_weight": CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "action_rate_l2",
+        "stages": [
+          {"step": 0, "weight": -0.01},
+          {"step": 400 * 24, "weight": -0.03},
+          {"step": 700 * 24, "weight": -0.05},
+        ],
+      },
+    ),
+    "joint_vel_weight": CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "joint_vel_l2",
+        "stages": [
+          {"step": 0, "weight": 0.0},
+          {"step": 400 * 24, "weight": -0.002},
+          {"step": 700 * 24, "weight": -0.005},
+          {"step": 1000 * 24, "weight": -0.01},
+        ],
+      },
+    ),
+    "yaw_rate_weight": CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "base_yaw_rate",
+        "stages": [
+          {"step": 0, "weight": -0.01},
+          {"step": 400 * 24, "weight": -0.05},
+          {"step": 700 * 24, "weight": -0.1},
+        ],
+      },
+    ),
+  }
 
   if play:
     cfg.observations["actor"].enable_corruption = False
