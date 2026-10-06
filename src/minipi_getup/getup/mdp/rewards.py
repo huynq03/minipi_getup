@@ -238,3 +238,78 @@ def feet_under_base(
   reward = torch.exp(-torch.square((dx - forward_offset) / std)).mean(dim=-1)
   gate = (asset.data.projected_gravity_b[:, 2] < upright_gravity_z).float()
   return gate * reward
+
+
+def target_past_limits(
+  env: ManagerBasedRlEnv, action_name: str = "joint_pos"
+) -> torch.Tensor:
+  """Sum over joints of how far the relative PD target is pushed past the joint limits.
+
+  With ``clip_target_to_limits`` such a push is clamped away, so a policy can park a
+  joint on its hard stop by pushing ever harder; this charges for the push.
+  """
+  term = env.action_manager.get_term(action_name)
+  asset: Entity = term._entity
+  ids = term._target_ids
+  target = asset.data.joint_pos[:, ids] + term._raw_actions * term._scale
+  limits = asset.data.soft_joint_pos_limits[:, ids]
+  excess = torch.relu(target - limits[..., 1]) + torch.relu(limits[..., 0] - target)
+  return excess.sum(dim=-1)
+
+
+def joint_near_limits(
+  env: ManagerBasedRlEnv,
+  margin: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Sum over joints of how far each joint is inside ``margin`` of a limit (rad)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+  limits = asset.data.soft_joint_pos_limits[:, asset_cfg.joint_ids]
+  low = torch.relu(limits[..., 0] + margin - q)
+  high = torch.relu(q - (limits[..., 1] - margin))
+  return (low + high).sum(dim=-1)
+
+
+def joint_vel_excess_l2(
+  env: ManagerBasedRlEnv,
+  limit: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Sum over joints of squared joint speed above ``limit`` (rad/s)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  qd = asset.data.joint_vel[:, asset_cfg.joint_ids].abs()
+  return torch.square(torch.relu(qd - limit)).sum(dim=-1)
+
+
+def actuator_force_excess_l2(
+  env: ManagerBasedRlEnv,
+  limit: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Sum over actuators of squared torque above ``limit`` (Nm)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  tau = asset.data.actuator_force.abs()
+  return torch.square(torch.relu(tau - limit)).sum(dim=-1)
+
+
+def base_lin_vel_z_excess_l2(
+  env: ManagerBasedRlEnv,
+  limit: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Squared base vertical speed above ``limit`` (m/s), up or down."""
+  asset: Entity = env.scene[asset_cfg.name]
+  vz = asset.data.root_link_lin_vel_w[:, 2].abs()
+  return torch.square(torch.relu(vz - limit))
+
+
+def base_ang_vel_xy_excess_l2(
+  env: ManagerBasedRlEnv,
+  limit: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Squared base roll/pitch rate magnitude above ``limit`` (rad/s)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  w = asset.data.root_link_ang_vel_b[:, :2].norm(dim=-1)
+  return torch.square(torch.relu(w - limit))

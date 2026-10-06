@@ -45,3 +45,15 @@ def minipi_getup_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     num_steps_per_env=24,
     max_iterations=3_000,
   )
+
+
+def minipi_getup_safe_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+  """PPO config for the hardware-safe get-up: raw actions clipped to +-0.8.
+
+  With the 0.25 relative action scale that bounds each step's PD target offset to
+  0.2 rad: at most ~12 Nm from the P term (kp <= 60) and ~10 rad/s of target motion.
+  The same clip must be applied on the robot. (+-0.6 was too tight to sit up.)
+  """
+  cfg = minipi_getup_ppo_runner_cfg()
+  cfg.clip_actions = 0.8
+  return cfg
