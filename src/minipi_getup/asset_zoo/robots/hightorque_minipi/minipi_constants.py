@@ -4,6 +4,7 @@ Model, joint names, PD gains and home keyframe are taken from the Mini-Pi veloci
 project (minipi_velocity/minipi/minipi_constants.py and xmls/cl_pai.xml).
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import mujoco
@@ -125,7 +126,14 @@ def get_minipi_robot_cfg() -> EntityCfg:
     init_state=HOME_KEYFRAME,
     collisions=(FULL_COLLISION,),
     spec_fn=get_spec,
-    articulation=MINIPI_ARTICULATION,
+    # Softer position control with unchanged damping to resist rebound.
+    articulation=replace(
+      MINIPI_ARTICULATION,
+      actuators=tuple(
+        replace(actuator, stiffness=actuator.stiffness * 0.7)
+        for actuator in MINIPI_ARTICULATION.actuators
+      ),
+    ),
   )
 
 

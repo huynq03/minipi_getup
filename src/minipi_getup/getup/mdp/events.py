@@ -169,3 +169,38 @@ def reset_fixed_pose(
   limits = soft_joint_pos_limits.expand(env.num_envs, -1, -1)[env_ids]
   pos = torch.clamp(nominal + noise, limits[..., 0], limits[..., 1])
   asset.write_joint_state_to_sim(pos, torch.zeros_like(pos), env_ids=env_ids)
+
+
+def reset_pose_mixture(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  poses: tuple[dict, ...],
+  probabilities: tuple[float, ...],
+  joint_pos_noise: float = 0.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Reset each env to one of several predefined configurations at rest.
+
+  Each entry of ``poses`` is a dict with ``root_pos``, ``root_quat`` and
+  ``joint_pos``, as for :func:`reset_fixed_pose`. Each env picks one pose with the
+  given ``probabilities`` (normalized), e.g. mostly lying with some crouched starts so
+  the later part of the getup is practiced too.
+  """
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+
+  probs = torch.tensor(probabilities, device=env.device, dtype=torch.float)
+  choice = torch.multinomial(probs / probs.sum(), len(env_ids), replacement=True)
+  for i, pose in enumerate(poses):
+    ids = env_ids[choice == i]
+    if len(ids) == 0:
+      continue
+    reset_fixed_pose(
+      env,
+      ids,
+      root_pos=pose["root_pos"],
+      root_quat=pose["root_quat"],
+      joint_pos=pose["joint_pos"],
+      joint_pos_noise=joint_pos_noise,
+      asset_cfg=asset_cfg,
+    )

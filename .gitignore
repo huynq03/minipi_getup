@@ -11,6 +11,8 @@ wheels/
 
 # Logs and checkpoints
 logs/
+*.log
+MUJOCO_LOG.TXT
 wandb/
 *.pt
 *.onnx
@@ -19,3 +21,4 @@ scripts/
 
 # Tools
 .ruff_cache/
+.warp-cache-cu12/

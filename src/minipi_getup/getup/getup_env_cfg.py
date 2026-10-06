@@ -221,6 +221,9 @@ def make_getup_env_cfg() -> ManagerBasedRlEnvCfg:
     "energy": TerminationTermCfg(
       func=mdp.energy_termination, params={"threshold": float("inf")}
     ),
+    # Reset an env whose physics state diverged to NaN/Inf, instead of letting the NaN
+    # reach the observations and abort training.
+    "nan": TerminationTermCfg(func=mdp.nan_detection),
   }
 
   ##

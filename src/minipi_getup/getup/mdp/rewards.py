@@ -37,13 +37,22 @@ def orientation_reward(
 def height_reward(
   env: ManagerBasedRlEnv,
   desired_height: float,
+  scale_by_uprightness: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Reward for raising a body (or the mean of several bodies) to the desired height."""
+  """Reward for raising a body (or the mean of several bodies) to the desired height.
+
+  With ``scale_by_uprightness``, the reward is multiplied by how much the torso points
+  up (-gravity z in the body frame, clamped to [0, 1]), so lifting the base while lying
+  or upside down (e.g. a shoulder stand) earns nothing.
+  """
   asset: Entity = env.scene[asset_cfg.name]
   height = asset.data.body_link_pos_w[:, asset_cfg.body_ids, 2].mean(dim=-1)
   clamped = torch.clamp(height, max=desired_height)
-  return (torch.exp(clamped) - 1.0) / (math.exp(desired_height) - 1.0)
+  reward = (torch.exp(clamped) - 1.0) / (math.exp(desired_height) - 1.0)
+  if scale_by_uprightness:
+    reward = reward * (-asset.data.projected_gravity_b[:, 2]).clamp(0.0, 1.0)
+  return reward
 
 
 def _is_upright(asset: Entity, orientation_threshold: float) -> torch.Tensor:
@@ -86,11 +95,16 @@ class gated_posture_reward:
     env: ManagerBasedRlEnv,
     std: dict[str, float],
     orientation_threshold: float = 0.01,
+    min_height: float = 0.0,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   ) -> torch.Tensor:
     del std  # Resolved in __init__.
     asset: Entity = env.scene[asset_cfg.name]
-    gate = _is_upright(asset, orientation_threshold)
+    # Also gated on root height, so sitting upright on the ground earns nothing.
+    gate = (
+      _is_upright(asset, orientation_threshold)
+      * (asset.data.root_link_pos_w[:, 2] >= min_height).float()
+    )
     current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
     desired_joint_pos = self.default_joint_pos[:, asset_cfg.joint_ids]
     error_squared = torch.square(current_joint_pos - desired_joint_pos)
@@ -134,6 +148,19 @@ def base_yaw_rate_l2(
   return torch.square(asset.data.root_link_ang_vel_w[:, 2])
 
 
+def base_yaw_rate_l1(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize world-z rotation throughout getup, including slow full turns.
+
+  With reward time scaling, the episode cost is proportional to total angular
+  travel rather than becoming smaller when the same turn is performed slowly.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  return asset.data.root_link_ang_vel_w[:, 2].abs()
+
+
 def upright_base_lin_vel_xy_l2(
   env: ManagerBasedRlEnv,
   orientation_threshold: float = 0.05,
@@ -149,13 +176,16 @@ def upright_base_lin_vel_xy_l2(
 def hip_roll_open_when_low(
   env: ManagerBasedRlEnv,
   max_height: float,
+  lying_gravity_z: float = 1.0,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Reward spreading the legs (hip roll toward its outward limit) while the torso is low.
+  """Reward spreading the legs (hip roll toward its outward limit) while lying low.
 
   The outward direction of each joint is the side of its range with the larger
   magnitude. Returns the mean opening fraction in [0, 1], gated on the root height
-  being below ``max_height``.
+  being below ``max_height`` and on the torso lying (body-frame gravity z within
+  ``±lying_gravity_z``; -1 is upright, +1 upside down), so neither a wide sit nor an
+  inverted pose is rewarded.
   """
   asset: Entity = env.scene[asset_cfg.name]
   limits = asset.data.soft_joint_pos_limits
@@ -166,5 +196,45 @@ def hip_roll_open_when_low(
   opening = (asset.data.joint_pos[:, asset_cfg.joint_ids] / outward_limit).clamp(
     0.0, 1.0
   )
-  gate = (asset.data.root_link_pos_w[:, 2] < max_height).float()
+  gate = (asset.data.root_link_pos_w[:, 2] < max_height).float() * (
+    asset.data.projected_gravity_b[:, 2].abs() < lying_gravity_z
+  ).float()
   return gate * opening.mean(dim=-1)
+
+
+def upward_speed_when_low(
+  env: ManagerBasedRlEnv,
+  max_height: float = 0.25,
+  max_speed: float = 0.3,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize rapid upward launches during preparation, allowing a slow rise."""
+  asset: Entity = env.scene[asset_cfg.name]
+  excess_speed = (asset.data.root_link_lin_vel_w[:, 2] - max_speed).clamp_min(0.0)
+  gate = (asset.data.root_link_pos_w[:, 2] < max_height).float()
+  return gate * excess_speed.square()
+
+
+def feet_under_base(
+  env: ManagerBasedRlEnv,
+  std: float,
+  forward_offset: float,
+  upright_gravity_z: float = -0.7,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward keeping the feet under the hips once the torso is upright-ish.
+
+  Measures each foot's offset from the base along the base heading and compares it
+  with ``forward_offset`` (the standing offset). Gated on body-frame gravity z being
+  below ``upright_gravity_z`` (-1 is upright), so it is active from sitting through
+  squatting to standing, and pulls the legs in from a sit with the legs out in front.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  heading = asset.data.heading_w
+  forward = torch.stack([torch.cos(heading), torch.sin(heading)], dim=-1)
+  base_xy = asset.data.root_link_pos_w[:, :2]
+  feet_xy = asset.data.body_link_pos_w[:, asset_cfg.body_ids, :2]
+  dx = torch.sum((feet_xy - base_xy.unsqueeze(1)) * forward.unsqueeze(1), dim=-1)
+  reward = torch.exp(-torch.square((dx - forward_offset) / std)).mean(dim=-1)
+  gate = (asset.data.projected_gravity_b[:, 2] < upright_gravity_z).float()
+  return gate * reward

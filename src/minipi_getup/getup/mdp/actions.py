@@ -28,6 +28,10 @@ class SettleRelativeJointPositionActionCfg(RelativeJointPositionActionCfg):
   """Number of env steps after reset during which the policy action is ignored and the
   robot holds its current position. Set to 0 to disable."""
 
+  clip_target_to_limits: bool = False
+  """Clamp the PD position target to the joint position limits, so the policy cannot
+  command a joint into its hard stop (as a hardware controller would)."""
+
   def build(self, env: ManagerBasedRlEnv) -> SettleRelativeJointPositionAction:
     return SettleRelativeJointPositionAction(self, env)
 
@@ -42,6 +46,7 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
   ):
     super().__init__(cfg=cfg, env=env)
     self._settle_steps = cfg.settle_steps
+    self._clip_target_to_limits = cfg.clip_target_to_limits
 
   def apply_actions(self) -> None:
     current_pos = self._entity.data.joint_pos[:, self._target_ids]
@@ -52,4 +57,9 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
       was_fallen = self._env.extras.get("settle_mask", in_window)
       settling = (in_window & was_fallen).unsqueeze(-1)
       target = torch.where(settling, current_pos - encoder_bias, target)
+    if self._clip_target_to_limits:
+      limits = self._entity.data.soft_joint_pos_limits
+      assert limits is not None
+      limits = limits[:, self._target_ids]
+      target = torch.clamp(target, min=limits[..., 0], max=limits[..., 1])
     self._entity.set_joint_position_target(target, joint_ids=self._target_ids)
