@@ -156,7 +156,9 @@ def _observations() -> dict[str, ObservationGroupCfg]:
   }
 
 
-def _rewards() -> dict[str, RewardTermCfg]:
+def _rewards(
+  weights: dict[str, tuple[float, float, float]],
+) -> dict[str, RewardTermCfg]:
   """All stage terms; weights start at stage r_u and the stage manager moves them."""
   terms = {
     "track_lin_vel": RewardTermCfg(
@@ -255,9 +257,9 @@ def _rewards() -> dict[str, RewardTermCfg]:
       params={"limit": 0.8 * OPERATIONAL_TORQUE_LIMIT},
     ),
   }
-  assert set(terms) == set(STAGE_WEIGHTS)
+  assert set(terms) == set(weights)
   for name, term in terms.items():
-    term.weight = STAGE_WEIGHTS[name][0]
+    term.weight = weights[name][0]
   return terms
 
 
@@ -307,7 +309,9 @@ def _domain_randomization() -> dict[str, EventTermCfg]:
   }
 
 
-def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
+def _base_cfg(
+  play: bool, weights: dict[str, tuple[float, float, float]]
+) -> ManagerBasedRlEnvCfg:
   feet_contact = ContactSensorCfg(
     name=_FEET_SENSOR,
     primary=ContactMatch(
@@ -354,7 +358,7 @@ def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
     },
     commands={"twist": twist},
     events={},
-    rewards=_rewards(),
+    rewards=_rewards(weights),
     terminations={
       "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
       "nan": TerminationTermCfg(func=mdp.nan_detection),
@@ -392,13 +396,15 @@ def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
   return cfg
 
 
-def _stage_event(fixed_stage: int | None) -> EventTermCfg:
+def _stage_event(
+  fixed_stage: int | None, weights: dict[str, tuple[float, float, float]]
+) -> EventTermCfg:
   return EventTermCfg(
     func=mdp.ftsr_stage_manager,
     mode="step",
     params={
       "heights": STAGE_HEIGHTS,
-      "weights": STAGE_WEIGHTS,
+      "weights": weights,
       "fraction": 2.0 / 3.0,
       "steps_per_iteration": STEPS_PER_ITERATION,
       "fixed_stage": fixed_stage,
@@ -407,8 +413,23 @@ def _stage_event(fixed_stage: int | None) -> EventTermCfg:
   )
 
 
-def ftsr_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
-  cfg = _base_cfg(play)
+def _stage_weights(
+  overrides: dict[str, tuple[float, float, float]] | None,
+) -> dict[str, tuple[float, float, float]]:
+  weights = dict(STAGE_WEIGHTS)
+  for name, value in (overrides or {}).items():
+    assert name in weights, name
+    weights[name] = value
+  return weights
+
+
+def ftsr_env_cfg(
+  play: bool = False,
+  stage_weight_overrides: dict[str, tuple[float, float, float]] | None = None,
+) -> ManagerBasedRlEnvCfg:
+  """Full FTSR task. ``stage_weight_overrides`` builds tuning variants."""
+  weights = _stage_weights(stage_weight_overrides)
+  cfg = _base_cfg(play, weights)
   n = len(FALLEN_POSE_NAMES)
   cfg.events["reset_pose"] = EventTermCfg(
     func=mdp.reset_pose_distribution,
@@ -421,7 +442,7 @@ def ftsr_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     },
   )
   # Stage first, so the assist reads this step's target height.
-  cfg.events["stage"] = _stage_event(fixed_stage=None)
+  cfg.events["stage"] = _stage_event(fixed_stage=None, weights=weights)
   cfg.events["assist"] = EventTermCfg(
     func=mdp.ftsr_assist,
     mode="step",
@@ -451,7 +472,7 @@ def ftsr_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
 def ftsr_walk_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """r_w pretraining (paper Sec. III-A, "Model Initialization")."""
-  cfg = _base_cfg(play)
+  cfg = _base_cfg(play, dict(STAGE_WEIGHTS))
   cfg.events["reset_pose"] = EventTermCfg(
     func=mdp.reset_pose_distribution,
     mode="reset",
@@ -462,7 +483,7 @@ def ftsr_walk_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "joint_noise": 0.05,
     },
   )
-  cfg.events["stage"] = _stage_event(fixed_stage=2)
+  cfg.events["stage"] = _stage_event(fixed_stage=2, weights=dict(STAGE_WEIGHTS))
   for name, term in cfg.rewards.items():
     term.weight = STAGE_WEIGHTS[name][2]
   # Walking only: a fall ends the episode (the recovery is learned later).

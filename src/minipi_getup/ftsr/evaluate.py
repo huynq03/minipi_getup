@@ -168,6 +168,10 @@ def run_episode(env, wrapped, policy, seed: int, task: str, steps: int) -> dict:
   feet_ids = robot.find_bodies(("r_ankle_roll_link", "l_ankle_roll_link"))[0]
   prev_feet = robot.data.body_link_pos_w[:, feet_ids, :2].clone()
   terminated = torch.zeros(n, dtype=torch.bool, device=dev)
+  # Peak motion while getting up (until recovered): the "jerk upright" signature.
+  peak_qd = torch.zeros(n, device=dev)
+  peak_vz = torch.zeros(n, device=dev)
+  peak_wxy = torch.zeros(n, device=dev)
   rate = smooth = qd_abs = qacc = 0.0
   motion_n = 0
   prev_qd = robot.data.joint_vel.clone()
@@ -196,6 +200,13 @@ def run_episode(env, wrapped, policy, seed: int, task: str, steps: int) -> dict:
     else:
       fell_after |= fallen & active
     max_h = torch.where(alive, torch.maximum(max_h, h), max_h)
+    rec = active & ~stood
+    qd_max = robot.data.joint_vel.abs().amax(dim=-1)
+    vz = robot.data.root_link_lin_vel_w[:, 2].abs()
+    wxy = robot.data.root_link_ang_vel_b[:, :2].norm(dim=-1)
+    peak_qd = torch.where(rec, torch.maximum(peak_qd, qd_max), peak_qd)
+    peak_vz = torch.where(rec, torch.maximum(peak_vz, vz), peak_vz)
+    peak_wxy = torch.where(rec, torch.maximum(peak_wxy, wxy), peak_wxy)
     tilt = torch.acos(up.clamp(-1, 1))
     tilt_sum += torch.where(active & stood, tilt, torch.zeros_like(tilt))
     upright_n += (active & stood).float()
@@ -250,6 +261,9 @@ def run_episode(env, wrapped, policy, seed: int, task: str, steps: int) -> dict:
     "foot_travel": foot_travel,
     "drift": drift,
     "zero_cmd": zero_cmd.float(),
+    "peak_qd": peak_qd,
+    "peak_vz": peak_vz,
+    "peak_wxy": peak_wxy,
     "cmd_id": ((torch.arange(n, device=dev) // len(POSES)) % len(COMMANDS)).float(),
     "pose_id": (torch.arange(n, device=dev) % len(POSES)).float(),
   }
@@ -306,6 +320,11 @@ def summarize(results: list[dict], task: str) -> dict:
     for i, p in enumerate(POSES):
       m = per["pose_id"] == i
       row[f"success_{p}"] = float(succ[m].mean())
+  if task == "recovery":
+    # Mean over episodes of the per-episode peak during the get-up, plus the worst.
+    for k in ("peak_qd", "peak_vz", "peak_wxy"):
+      row["recovery_" + k + "_mean"] = float(per[k].mean())
+      row["recovery_" + k + "_max"] = float(per[k].max())
   tracked = per["track_n"] > 25
   moving = tracked & (per["zero_cmd"] == 0)
   row["lin_vel_error"] = (
