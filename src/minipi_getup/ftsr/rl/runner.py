@@ -170,6 +170,10 @@ class FtsrRunner:
       logs: dict[str, list[float]] = defaultdict(list)
       motion = defaultdict(float)
       monitor.clear()
+      # Whether the Eq. 4 wrench was nonzero anywhere in this rollout. Checked on the
+      # raw costs: the time-out bootstrap below adds gamma * V_C, which would keep
+      # the constraint term alive (as standardized noise) after t_tag.
+      cost_seen = False
       with torch.inference_mode():
         for _ in range(cfg["num_steps_per_env"]):
           z_t, z_s, z = self._latents(obs)
@@ -180,6 +184,7 @@ class FtsrRunner:
           value = self.model.value(z_t, obs["critic"])
           cost_value = self.model.cost_value(z_t, obs["critic"])
           cost = self._cost()
+          cost_seen |= bool(cost.abs().max() > 0.0)
           step_obs = {g: obs[g] for g in self.groups}
 
           obs, rewards, dones, extras = self.env.step(actions)
@@ -239,7 +244,7 @@ class FtsrRunner:
           gamma,
           lam,
           tuple(cfg["penalty_factors"]),
-          cfg["use_force_guidance"],
+          cfg["use_force_guidance"] and cost_seen,
         )
       t_collect = time.time() - t0
 

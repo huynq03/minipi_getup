@@ -83,8 +83,9 @@ class FtsrStorage:
     std() is per-batch standardization ("an additional standardization step is
     applied" before the gradient). The J_Ci(pi_k) term of Eq. 8 is the same for every
     sample of the batch. Its gradient contribution through the PPO ratio is zero in
-    expectation, so only its value is logged. The term turns off when the rollout's
-    costs are all zero: after t_tag (d_i = 0), A_bar = A_r exactly.
+    expectation, so only its value is logged. The caller turns the term off
+    (``use_constraints=False``) when no assist was applied during the rollout: after
+    t_tag (d_i = 0), A_bar = A_r exactly.
     """
     d = self.dones.unsqueeze(-1)
     self.returns, adv_r = self._gae(
@@ -103,7 +104,7 @@ class FtsrStorage:
       "constraint_active": 0.0,
       "constraint_adv_std": 0.0,
     }
-    if use_constraints and bool(self.costs.abs().max() > 0.0):
+    if use_constraints:
       penalty = torch.zeros_like(adv)
       for i, beta in enumerate(penalty_factors):
         a = adv_c[..., i]
