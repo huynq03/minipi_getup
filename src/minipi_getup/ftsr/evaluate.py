@@ -83,6 +83,7 @@ def _build(
   seed: int,
   action_relative: bool | None = None,
   action_scale: float | None = None,
+  assist_iteration: int | None = None,
 ):
   import mjlab.tasks  # noqa: F401
   from mjlab.envs import ManagerBasedRlEnv
@@ -98,6 +99,10 @@ def _build(
   cfg.scene.num_envs = num_envs
   cfg.seed = seed
   assert "assist" not in cfg.events, "evaluation must run without assistance"
+  if assist_iteration is not None:
+    # Diagnostic only: keep the training-time Eq. 4 assist, frozen at the schedule
+    # point of ``assist_iteration`` (the stage's h_cmd follows the stage manager).
+    cfg.events["assist"] = load_env_cfg(task_id).events["assist"]
   if task == "recovery":
     assert FALLEN_POSE_NAMES == POSES
     cfg.events["reset_pose"].params["poses"] = tuple(FALLEN_POSES[p] for p in POSES)
@@ -355,19 +360,31 @@ def main() -> None:
   ap.add_argument("--device", default="cuda:0")
   ap.add_argument("--action-relative", choices=("true", "false"), default=None)
   ap.add_argument("--action-scale", type=float, default=None)
+  ap.add_argument(
+    "--assist-iteration",
+    type=int,
+    default=None,
+    help="diagnostic: evaluate WITH the Eq. 4 assist at this training iteration",
+  )
   args = ap.parse_args()
 
   seconds = args.seconds or (20.0 if args.task == "recovery" else 10.0)
   rel = None if args.action_relative is None else args.action_relative == "true"
   env, wrapped, runner = _build(
-    args.task, args.envs, args.device, args.seeds[0], rel, args.action_scale
+    args.task,
+    args.envs,
+    args.device,
+    args.seeds[0],
+    rel,
+    args.action_scale,
+    args.assist_iteration,
   )
   steps = int(round(seconds / env.step_dt))
   os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
   rows = []
   for ckpt in args.checkpoints:
     infos = runner.load(ckpt, map_location=args.device)
-    env.common_step_counter = 0
+    env.common_step_counter = 24 * (args.assist_iteration or 0)
     policy = runner.get_inference_policy(device=args.device, mode=args.mode)
     results = [
       run_episode(env, wrapped, policy, s, args.task, steps) for s in args.seeds
@@ -381,7 +398,8 @@ def main() -> None:
       "mode": args.mode,
       "seeds": " ".join(map(str, args.seeds)),
       "episodes": args.envs * len(args.seeds),
-      "assistance_force": 0.0,
+      "assistance_force": 0.0 if args.assist_iteration is None else -1.0,
+      "assist_iteration": args.assist_iteration,
       "train_step_counter": (infos or {})
       .get("env_state", {})
       .get("common_step_counter"),
