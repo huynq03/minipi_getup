@@ -460,6 +460,7 @@ def ftsr_env_cfg(
   dc_motor_effort_limit: float | None = None,
   max_action_step: float = 0.0,
   assist_end_iteration: int = ASSIST_END_ITERATION,
+  fixed_stage: int | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Full FTSR task. ``stage_weight_overrides`` builds tuning variants.
 
@@ -506,7 +507,7 @@ def ftsr_env_cfg(
     },
   )
   # Stage first, so the assist reads this step's target height.
-  cfg.events["stage"] = _stage_event(fixed_stage=None, weights=weights)
+  cfg.events["stage"] = _stage_event(fixed_stage=fixed_stage, weights=weights)
   cfg.events["assist"] = EventTermCfg(
     func=mdp.ftsr_assist,
     mode="step",

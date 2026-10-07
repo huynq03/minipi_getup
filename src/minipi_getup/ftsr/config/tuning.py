@@ -84,3 +84,9 @@ GETUP_DEPLOY = {"torque_limit": (-1.0, -1.0, -1.0)}
 # standing, prone not relearned). Re-run the FTSR curriculum on the deploy env from the
 # Gentle weights, with a short assist schedule (off at it 1000 of the new run).
 DEPLOY_ASSIST_END_ITERATION = 1000
+# v3 collapsed at it ~420 (population above h1 fell to 0): the stage manager isn't
+# checkpointed, so every fine-tune restarts in r_u, and with the new motor model only
+# ~50 % stood, below the 2/3 needed to leave it; r_u (height target 0.19 m) pulled the
+# policy away from standing. v2 stalled in r_u too. v4 fixes the stage at r_w, the
+# reward the Gentle policy was trained under.
+DEPLOY_FIXED_STAGE = 2
