@@ -70,120 +70,93 @@ def plant_setup(env: ManagerBasedRlEnv, env_ids) -> None:
   del env, env_ids
 
 
-class _Hist:
-  """Per-joint histogram of |x| with fixed bins (quantiles without storing samples)."""
-
-  def __init__(self, nj: int, width: float, vmax: float, device):
-    self.nj, self.width = nj, width
-    self.nb = int(round(vmax / width))
-    self.device = device
-    self.clear()
-
-  def clear(self) -> None:
-    self.counts = torch.zeros(self.nj, self.nb, device=self.device, dtype=torch.float64)
-    self.total = torch.zeros(self.nj, device=self.device, dtype=torch.float64)
-    self.max = torch.zeros(self.nj, device=self.device)
-    self.n = torch.zeros(self.nj, device=self.device, dtype=torch.float64)
-
-  def add(self, x: torch.Tensor) -> None:
-    """x: (B, nj), already masked to valid samples."""
-    if x.numel() == 0:
-      return
-    a = x.abs()
-    idx = (a / self.width).long().clamp_(max=self.nb - 1)
-    flat = idx + torch.arange(self.nj, device=self.device) * self.nb
-    self.counts += (
-      torch.bincount(flat.flatten(), minlength=self.nj * self.nb)
-      .double()
-      .view(self.nj, self.nb)
-    )
-    self.total += a.sum(0).double()
-    self.max = torch.maximum(self.max, a.amax(0))
-    self.n += a.shape[0]
-
-  def frac_above(self, thr: float) -> torch.Tensor:
-    i = int(thr / self.width)
-    return self.counts[:, i:].sum(1) / self.n.clamp(min=1)
-
-  def quantile(self, q: float) -> torch.Tensor:
-    cdf = torch.cumsum(self.counts, 1) / self.n.clamp(min=1).unsqueeze(1)
-    idx = (cdf < q).sum(1)
-    return (idx + 1).float() * self.width
-
-  def summary(self, prefix: str) -> dict[str, torch.Tensor]:
-    return {
-      f"{prefix}_mean": (self.total / self.n.clamp(min=1)).float(),
-      f"{prefix}_p95": self.quantile(0.95),
-      f"{prefix}_p99": self.quantile(0.99),
-      f"{prefix}_max": self.max,
-    }
-
-
 class SubstepMonitor:
-  """Physics-substep actuator / speed statistics of actuated envs."""
+  """Physics-step actuator / speed statistics of actuated envs, for training logs.
+
+  Cheap sufficient statistics only (per joint): sample count, sum and max of |tau|,
+  |qdot| and |q* - q|, and threshold counts (|qdot| > 3 and > 4 rad/s, |tau| above the
+  candidate rated torque, |tau| >= 0.95 cap). Everything stays on the device during
+  the rollout; ``summary()`` converts once per iteration. Quantiles (p95 / p99) are
+  not computed here: ``evaluate.py`` reports them from full histograms.
+  """
 
   def __init__(self, nj: int, num_envs: int, motor: MotorEnvelopeCfg, device):
     self.motor = motor
     self.device = device
-    self.tau = _Hist(nj, 0.02, 40.0, device)
-    self.qd = _Hist(nj, 0.02, 60.0, device)
-    self.err = _Hist(nj, 0.002, 4.0, device)
+    self.nj = nj
     self.ep_qd_max = torch.zeros(num_envs, device=device)
     self.clear()
 
   def clear(self) -> None:
-    self.tau.clear()
-    self.qd.clear()
-    self.err.clear()
-    self.slew_sat = 0.0
-    self.slew_n = 0.0
-    self.eps = 0.0
-    self.eps_over4 = 0.0
-    self.near_cap = torch.zeros((), device=self.device, dtype=torch.float64)
+    def z(*shape):
+      return torch.zeros(shape, device=self.device)
 
-  def add(self, tau, qd, err, mask) -> None:
-    self.tau.add(tau[mask])
-    self.qd.add(qd[mask])
-    self.err.add(err[mask])
-    self.near_cap += (tau[mask].abs() >= 0.95 * self.motor.tau_cap).sum().double()
-    self.ep_qd_max = torch.where(
-      mask, torch.maximum(self.ep_qd_max, qd.abs().amax(-1)), self.ep_qd_max
-    )
+    nj = self.nj
+    self.n = z()
+    self.tau_sum, self.tau_max = z(nj), z(nj)
+    self.qd_sum, self.qd_max = z(nj), z(nj)
+    self.err_sum, self.err_max = z(nj), z(nj)
+    self.qd_over3, self.qd_over4 = z(nj), z(nj)
+    self.tau_over_rated, self.tau_near_cap = z(nj), z(nj)
+    self.slew_sat, self.slew_n = z(), z()
+    self.eps, self.eps_over4 = z(), z()
+
+  def add(self, tau, qd, err, mask_f) -> None:
+    """mask_f: (B, 1) float, 1 for actuated envs."""
+    at = tau.abs() * mask_f
+    aq = qd.abs() * mask_f
+    ae = err.abs() * mask_f
+    self.n += mask_f.sum()
+    self.tau_sum += at.sum(0)
+    self.qd_sum += aq.sum(0)
+    self.err_sum += ae.sum(0)
+    self.tau_max = torch.maximum(self.tau_max, at.amax(0))
+    self.qd_max = torch.maximum(self.qd_max, aq.amax(0))
+    self.err_max = torch.maximum(self.err_max, ae.amax(0))
+    self.qd_over3 += (aq > 3.0).sum(0)
+    self.qd_over4 += (aq > 4.0).sum(0)
+    self.tau_over_rated += (at > self.motor.tau_rated).sum(0)
+    self.tau_near_cap += (at >= 0.95 * self.motor.tau_cap).sum(0)
+    self.ep_qd_max = torch.maximum(self.ep_qd_max, aq.amax(-1))
 
   def end_episodes(self, env_ids) -> None:
     m = self.ep_qd_max[env_ids]
-    self.eps += float(m.numel())
-    self.eps_over4 += float((m > 4.0).sum())
+    self.eps += m.numel()
+    self.eps_over4 += (m > 4.0).sum()
     self.ep_qd_max[env_ids] = 0.0
 
   def summary(self, joint_names: tuple[str, ...]) -> dict[str, float]:
-    """Scalars: whole-robot aggregates plus per-joint p99/max."""
-    out: dict[str, float] = {}
-    n = float(self.tau.n.sum())
+    """Means, maxima and threshold fractions (one host transfer per call)."""
+    n = float(self.n)
     if n == 0:
-      return out
-    for prefix, h in (("tau", self.tau), ("qd", self.qd), ("err", self.err)):
-      s = h.summary(prefix)
-      for k, v in s.items():
-        out[k] = (
-          float(v.max()) if k.endswith(("max", "p95", "p99")) else float(v.mean())
-        )
-      for j, name in enumerate(joint_names):
-        short = name.replace("_joint", "")
-        out[f"{prefix}_p99/{short}"] = float(s[f"{prefix}_p99"][j])
-        out[f"{prefix}_max/{short}"] = float(s[f"{prefix}_max"][j])
-    qd_counts = self.qd.counts.sum(0)
-    w = self.qd.width
-    out["qd_frac_above_3"] = float(qd_counts[int(3.0 / w) :].sum() / n)
-    out["qd_frac_above_4"] = float(qd_counts[int(4.0 / w) :].sum() / n)
-    tc = self.tau.counts.sum(0)
-    out["tau_frac_above_rated"] = float(
-      tc[int(self.motor.tau_rated / self.tau.width) :].sum() / n
-    )
-    out["tau_frac_near_cap"] = float(self.near_cap / n)
-    out["slew_saturation_fraction"] = self.slew_sat / max(self.slew_n, 1.0)
-    if self.eps > 0:
-      out["episodes_with_qd_above_4"] = self.eps_over4 / self.eps
+      return {}
+    tau_mean = (self.tau_sum / n).tolist()
+    qd_mean = (self.qd_sum / n).tolist()
+    tau_max = self.tau_max.tolist()
+    qd_max = self.qd_max.tolist()
+    nj = self.nj
+    out: dict[str, float] = {
+      "tau_mean": sum(tau_mean) / nj,
+      "tau_max": max(tau_max),
+      "qd_mean": sum(qd_mean) / nj,
+      "qd_max": max(qd_max),
+      "err_mean": float(self.err_sum.sum()) / (n * nj),
+      "err_max": float(self.err_max.max()),
+      "qd_frac_above_3": float(self.qd_over3.sum()) / (n * nj),
+      "qd_frac_above_4": float(self.qd_over4.sum()) / (n * nj),
+      "tau_frac_above_rated": float(self.tau_over_rated.sum()) / (n * nj),
+      "tau_frac_near_cap": float(self.tau_near_cap.sum()) / (n * nj),
+      "slew_saturation_fraction": float(self.slew_sat) / max(float(self.slew_n), 1.0),
+    }
+    for j, name in enumerate(joint_names):
+      short = name.replace("_joint", "")
+      out[f"tau_mean/{short}"] = tau_mean[j]
+      out[f"tau_max/{short}"] = tau_max[j]
+      out[f"qd_mean/{short}"] = qd_mean[j]
+      out[f"qd_max/{short}"] = qd_max[j]
+    eps = float(self.eps)
+    if eps > 0:
+      out["episodes_with_qd_above_4"] = float(self.eps_over4) / eps
     return out
 
 
@@ -260,6 +233,14 @@ class FtsrAction(ActionTerm):
     env.extras[COST_KEY] = self._cost
     self._substeps = 0
     self.t_coeff = 0.0
+    # Host-side assist state (no GPU reads in the physics loop): ``_assist_live``
+    # while a nonzero wrench may be in the simulation; it is cleared with one zero
+    # write in the first physics step at or after t_tag.
+    self._assist_live = cfg.assist is not None
+    # Per-policy-step effective gains (passive: kp 0, kd 1) and actuated mask.
+    self._kp_eff = torch.zeros(n, nj, device=dev)
+    self._kd_eff = torch.zeros(n, nj, device=dev)
+    self._act_f = torch.ones(n, 1, device=dev)
 
     self.monitor = SubstepMonitor(nj, n, cfg.motor, dev)
 
@@ -302,11 +283,8 @@ class FtsrAction(ActionTerm):
     oscillates on the ankle-roll joint, whose inertia is 4.4e-4 kg m^2:
     dt stall / (w0 I) = 12 > 2).
     """
-    assert self._kp is not None and self._kd is not None
     m = self.cfg.motor
-    p = self.passive.unsqueeze(-1)
-    kp = torch.where(p, torch.zeros_like(self._kp), self._kp)
-    kd = torch.where(p, torch.full_like(self._kd, PASSIVE_KD), self._kd)
+    kp, kd = self._kp_eff, self._kd_eff
     tau_pd = kp * (self.q_star - q) - kd * qd
     slope = m.tau_stall / m.omega0
     upper = m.tau_stall - slope * qd
@@ -316,16 +294,12 @@ class FtsrAction(ActionTerm):
     curve = on_upper | on_lower
     model = self._env.sim.model
     c = self._ctrl
-    model.actuator_gainprm[:, c, 0] = torch.where(curve, torch.zeros_like(kp), kp)
-    model.actuator_biasprm[:, c, 0] = torch.where(
-      on_upper,
-      torch.full_like(kp, m.tau_stall),
-      torch.where(on_lower, torch.full_like(kp, -m.tau_stall), torch.zeros_like(kp)),
-    )
-    model.actuator_biasprm[:, c, 1] = torch.where(curve, torch.zeros_like(kp), -kp)
-    model.actuator_biasprm[:, c, 2] = torch.where(
-      curve, torch.full_like(kd, -slope), -kd
-    )
+    model.actuator_gainprm[:, c, 0] = torch.where(curve, 0.0, kp)
+    model.actuator_biasprm[:, c, 0] = (
+      on_upper.float() - on_lower.float()
+    ) * m.tau_stall
+    model.actuator_biasprm[:, c, 1] = torch.where(curve, 0.0, -kp)
+    model.actuator_biasprm[:, c, 2] = torch.where(curve, -slope, -kd)
 
   def process_actions(self, actions: torch.Tensor) -> None:
     env = self._env
@@ -338,6 +312,11 @@ class FtsrAction(ActionTerm):
     self.entered |= entry
     self.passive = passive
     self._nominal_gains()
+    assert self._kp is not None and self._kd is not None
+    p = passive.unsqueeze(-1)
+    self._kp_eff = torch.where(p, 0.0, self._kp)
+    self._kd_eff = torch.where(p, PASSIVE_KD, self._kd)
+    self._act_f = (~p).float()
 
     a = torch.clamp(actions, -self.cfg.raw_clip, self.cfg.raw_clip)
     a = torch.where(passive.unsqueeze(-1), torch.zeros_like(a), a)
@@ -353,11 +332,9 @@ class FtsrAction(ActionTerm):
     self.q_star = torch.where(passive.unsqueeze(-1), q_meas, q_new)
     self.q_cmd = q_cmd
 
-    n_act = float(act.sum())
-    if n_act > 0:
-      sat = (delta.abs() > step + 1e-6) & act.unsqueeze(-1)
-      self.monitor.slew_sat += float(sat.sum())
-      self.monitor.slew_n += n_act * delta.shape[1]
+    sat = (delta.abs() > step + 1e-6) & act.unsqueeze(-1)
+    self.monitor.slew_sat += sat.sum()
+    self.monitor.slew_n += act.sum() * delta.shape[1]
 
     self._cost.zero_()
     self._substeps = 0
@@ -371,37 +348,37 @@ class FtsrAction(ActionTerm):
     env = self._env
     data = self._entity.data
     qd = data.joint_vel[:, self._ids]
-    act = ~self.passive
+    q = data.joint_pos[:, self._ids]
 
     if self._substeps > 0:
       # Results of the previous physics step of this policy step.
       tau = data.qfrc_actuator[:, self._ids]
-      err = self.q_star - data.joint_pos[:, self._ids]
-      self.monitor.add(tau, qd, err, act)
+      self.monitor.add(tau, qd, self.q_star - q, self._act_f)
 
-    self._write_actuator_law(data.joint_pos[:, self._ids], qd)
+    self._write_actuator_law(q, qd)
     self._entity.set_joint_position_target(self.q_star, joint_ids=self._ids)
 
     a_cfg = self.cfg.assist
-    if a_cfg is not None and (self.t_coeff > 0.0 or bool(self.force.any())):
+    if a_cfg is not None and self._assist_live:
       if self.t_coeff > 0.0:
         stage = env.extras[STAGE_KEY]
         h = data.body_link_pos_w[:, self._base[0], 2]
         quat = data.body_link_quat_w[:, self._base[0]]
         f, t = eq4_wrench(h, quat, stage.h_cmd, self.t_coeff, a_cfg)
-        m = act.float().unsqueeze(-1)
-        self.force, self.torque = f * m, t * m
+        self.force, self.torque = f * self._act_f, t * self._act_f
+        # Normalized constraint costs (Eq. 5-8 units: F / F_max, T / (T_max pi)),
+        # averaged over the policy step's physics steps.
+        d = float(env.cfg.decimation)
+        self._cost[:, 0] += self.force.norm(dim=-1) / a_cfg.f_max / d
+        self._cost[:, 1] += self.torque.norm(dim=-1) / (a_cfg.t_max * torch.pi) / d
       else:
+        # t >= t_tag: clear the wrench once; costs stay exactly zero.
         self.force.zero_()
         self.torque.zero_()
+        self._assist_live = False
       self._entity.write_external_wrench_to_sim(
         self.force[:, None, :], self.torque[:, None, :], body_ids=self._base
       )
-      # Normalized constraint costs (Eq. 5-8 units: F / F_max, T / (T_max pi)),
-      # averaged over the policy step's physics steps.
-      d = float(env.cfg.decimation)
-      self._cost[:, 0] += self.force.norm(dim=-1) / a_cfg.f_max / d
-      self._cost[:, 1] += self.torque.norm(dim=-1) / (a_cfg.t_max * torch.pi) / d
     self._substeps += 1
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
@@ -412,20 +389,22 @@ class FtsrAction(ActionTerm):
     self._prev_prev_raw[env_ids] = 0.0
     self.entered[env_ids] = False
     self.monitor.end_episodes(env_ids)
-    if self.cfg.assist is not None:
+    if self.cfg.assist is not None and self._assist_live:
       self.force[env_ids] = 0.0
       self.torque[env_ids] = 0.0
       self._entity.write_external_wrench_to_sim(
         self.force[:, None, :], self.torque[:, None, :], body_ids=self._base
       )
 
-  def log_assist(self) -> dict[str, float]:
+  def log_assist(self) -> dict[str, float | torch.Tensor]:
+    """Device tensors (and the host time coefficient); reduced by the caller once
+    per iteration."""
     f = self.force.norm(dim=-1)
     t = self.torque.norm(dim=-1)
     return {
       "Assist/time_coeff": self.t_coeff,
-      "Assist/force_mean": float(f.mean()),
-      "Assist/force_max": float(f.max()),
-      "Assist/torque_mean": float(t.mean()),
-      "Assist/torque_max": float(t.max()),
+      "Assist/force_mean": f.mean(),
+      "Assist/force_max": f.max(),
+      "Assist/torque_mean": t.mean(),
+      "Assist/torque_max": t.max(),
     }

@@ -256,11 +256,12 @@ def pen_max_velocity_l2(env) -> torch.Tensor:
   c_low, c_high = c < 0.0, c >= 0.0
   desired = (~(vel_low | vel_high)) & c_high
   desired_1 = ~(vel_low_1 | vel_high_1) & c_low
+  # Same assignment order as the release (later writes win), without masked
+  # indexing (a host sync).
   r = torch.zeros_like(v)
-  r[vel_low | vel_low_1] = -1.0
-  r[vel_high | vel_high_1] = -1.0
-  r[desired | desired_1] = 1.0
-  return r
+  r = torch.where(vel_low | vel_low_1, -1.0, r)
+  r = torch.where(vel_high | vel_high_1, -1.0, r)
+  return torch.where(desired | desired_1, 1.0, r)
 
 
 @staged

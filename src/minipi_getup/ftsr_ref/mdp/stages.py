@@ -42,15 +42,20 @@ class StageCfg:
   """Force one stage (2 = r_w for the walking initialization)."""
 
 
-def decide_stage(h: torch.Tensor, cfg: StageCfg) -> tuple[int, float, float]:
-  """(stage, |S_1|/N, |S_2|/N) from base heights ``h`` (N,)."""
-  s1 = float((h > cfg.heights[0]).float().mean())
-  s2 = float((h > cfg.heights[1]).float().mean())
+def decide_stage(
+  h: torch.Tensor, cfg: StageCfg
+) -> tuple[int, torch.Tensor, torch.Tensor]:
+  """(stage, |S_1|/N, |S_2|/N) from base heights ``h`` (N,); fractions as device
+  scalars. A fixed stage needs no host read; otherwise the fractions are read once
+  per env step (the stage selects host-side reward weights)."""
+  s1 = (h > cfg.heights[0]).float().mean()
+  s2 = (h > cfg.heights[1]).float().mean()
   if cfg.fixed_stage is not None:
     return cfg.fixed_stage, s1, s2
-  if s2 > cfg.fraction:
+  f1, f2 = torch.stack((s1, s2)).tolist()
+  if f2 > cfg.fraction:
     return 2, s1, s2
-  if s1 > cfg.fraction:
+  if f1 > cfg.fraction:
     return 1, s1, s2
   return 0, s1, s2
 
@@ -65,8 +70,8 @@ class StageState:
     self._body = torso.body_ids[0]
     self.step = -1
     self.stage = cfg.fixed_stage if cfg.fixed_stage is not None else 0
-    self.s1 = 0.0
-    self.s2 = 0.0
+    self.s1: torch.Tensor | float = 0.0
+    self.s2: torch.Tensor | float = 0.0
 
   @property
   def h_cmd(self) -> float:

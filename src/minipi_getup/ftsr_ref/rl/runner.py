@@ -149,14 +149,20 @@ class FtsrRunner:
     start = self.current_learning_iteration
     end = start + num_learning_iterations
 
+    T = cfg["num_steps_per_env"]
     for it in range(start, end):
       t0 = time.time()
       self.model.train()
-      logs: dict[str, list[float]] = defaultdict(list)
+      # Rollout logs stay on the device (sum, count); reduced once per iteration.
+      log_sum: dict[str, torch.Tensor | float] = {}
+      log_cnt: dict[str, int] = defaultdict(int)
       monitor.clear()
-      cost_seen = False
+      cost_seen = torch.zeros((), dtype=torch.bool, device=self.device)
+      done_mask = torch.zeros(T, self.num_envs, dtype=torch.bool, device=self.device)
+      done_rew = torch.zeros(T, self.num_envs, device=self.device)
+      done_len = torch.zeros(T, self.num_envs, device=self.device)
       with torch.inference_mode():
-        for _ in range(cfg["num_steps_per_env"]):
+        for step in range(T):
           z_t, z_s, mean, std, value = self.act(obs)
           dist = torch.distributions.Normal(mean, std)
           actions = dist.sample()
@@ -164,7 +170,7 @@ class FtsrRunner:
           obs, rewards, dones, extras = self.env.step(actions)
           obs = obs.to(self.device)
           cost = unwrapped.extras[COST_KEY].clone()
-          cost_seen |= bool(cost.abs().max() > 0.0)
+          cost_seen |= (cost.abs() > 0.0).any()
           rewards = rewards.clone()
           if "time_outs" in extras:
             rewards += gamma * value * extras["time_outs"].float()
@@ -181,20 +187,28 @@ class FtsrRunner:
             dones=dones.float(),
             values=value,
           )
-          for k, v in extras.get("log", {}).items():
-            logs[k].append(float(v.float().mean()) if torch.is_tensor(v) else float(v))
+          items = dict(extras.get("log", {}))
           if action_term.cfg.assist is not None:
-            for k, v in action_term.log_assist().items():
-              logs[k].append(v)
+            items.update(action_term.log_assist())
+          for k, v in items.items():
+            v = v.float().mean() if torch.is_tensor(v) else float(v)
+            log_sum[k] = log_sum[k] + v if k in log_sum else v
+            log_cnt[k] += 1
           cur_rew += rewards
           cur_len += 1
-          done_ids = (dones > 0).nonzero(as_tuple=False).squeeze(-1)
-          if len(done_ids) > 0:
-            rew_buf.extend(cur_rew[done_ids].tolist())
-            len_buf.extend(cur_len[done_ids].tolist())
-            cur_rew[done_ids] = 0.0
-            cur_len[done_ids] = 0.0
+          d = dones > 0
+          done_mask[step] = d
+          done_rew[step] = cur_rew
+          done_len[step] = cur_len
+          cur_rew *= ~d
+          cur_len *= ~d
 
+      # Finished episodes, in the same (step, env) order as a per-step nonzero().
+      rew_buf.extend(done_rew[done_mask].tolist())
+      len_buf.extend(done_len[done_mask].tolist())
+      logs = {
+        k: [float(v) / log_cnt[k]] for k, v in log_sum.items()
+      }  # one host transfer per key
       with torch.no_grad():
         z_t = self.model.teacher_encoder(obs["teacher"])
         last_value = self.model.value(z_t, obs["critic"])
@@ -203,7 +217,7 @@ class FtsrRunner:
           gamma,
           lam,
           tuple(cfg["penalty_factors"]),
-          cfg["use_force_guidance"] and cost_seen,
+          cfg["use_force_guidance"] and bool(cost_seen),
           cfg["cost_j_mode"],
           cfg["standardize_cost_advantage"],
         )
@@ -233,7 +247,7 @@ class FtsrRunner:
   def _update(self) -> dict[str, float]:
     cfg = self.cfg
     clip = cfg["clip_param"]
-    stats: dict[str, float] = defaultdict(float)
+    stats: dict[str, float | torch.Tensor] = defaultdict(float)
     n = 0
     for mb in self.storage.minibatches(
       cfg["num_mini_batches"], cfg["num_learning_epochs"], self.teacher_mask
@@ -286,13 +300,14 @@ class FtsrRunner:
       loss.backward()
       grad = nn.utils.clip_grad_norm_(m.ppo_parameters(), cfg["max_grad_norm"])
       self.optimizer.step()
-      stats["surrogate"] += float(surrogate)
-      stats["value"] += float(value_loss)
-      stats["entropy"] += float(entropy)
-      stats["grad_norm"] += float(grad)
-      stats["clip_frac"] += float(((ratio - 1.0).abs() > clip).float().mean())
+      with torch.no_grad():  # device accumulators, read once after the update
+        stats["surrogate"] += surrogate.detach()
+        stats["value"] += value_loss.detach()
+        stats["entropy"] += entropy.detach()
+        stats["grad_norm"] += grad.detach()
+        stats["clip_frac"] += ((ratio - 1.0).abs() > clip).float().mean()
       n += 1
-    return {k: v / n for k, v in stats.items()}
+    return {k: float(v) / n for k, v in stats.items()}
 
   def _update_student(self) -> dict[str, float]:
     cfg = self.cfg
@@ -312,9 +327,9 @@ class FtsrRunner:
         self.model.student_encoder.parameters(), cfg["student_max_grad_norm"]
       )
       self.student_optimizer.step()
-      total += float(loss)
+      total += loss.detach()
       n += 1
-    return {"student_mse": total / n}
+    return {"student_mse": float(total) / n}
 
   # ---------------------------------------------------------------------------
   # Periodic no-assist evaluation (separate process, does not block training).
@@ -370,9 +385,9 @@ class FtsrRunner:
       f"len {g('Train/mean_episode_length', float('nan')):.0f} "
       f"stage {g('Stage/stage', -1):.1f} S1 {g('Stage/frac_above_h1', 0):.2f} "
       f"S2 {g('Stage/frac_above_h2', 0):.2f} F {g('Assist/force_mean', 0):.1f}N "
-      f"tc {g('Assist/time_coeff', 0):.3f} | tau p99 {safety.get('tau_p99', 0):.1f} "
-      f"max {safety.get('tau_max', 0):.1f} | qd p99 {safety.get('qd_p99', 0):.1f} "
-      f">3 {safety.get('qd_frac_above_3', 0):.3f} >4 "
+      f"tc {g('Assist/time_coeff', 0):.3f} | tau mean {safety.get('tau_mean', 0):.2f} "
+      f"max {safety.get('tau_max', 0):.1f} | qd mean {safety.get('qd_mean', 0):.2f} "
+      f"max {safety.get('qd_max', 0):.1f} >3 {safety.get('qd_frac_above_3', 0):.3f} >4 "
       f"{safety.get('qd_frac_above_4', 0):.3f} | slew "
       f"{safety.get('slew_saturation_fraction', 0):.2f} | mse "
       f"{loss_info.get('student_mse', 0):.4f} std "

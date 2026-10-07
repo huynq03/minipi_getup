@@ -79,3 +79,44 @@
   --agent.max-iterations 600 --agent.run-name ftsr_ref_walk_v1` (tmux getup:ref,
   log `logs/ftsr_ref_walk_v1.log`). No gait clock, no legged shaping (release r_w with
   robot replacements only), slew 0.06 rad/step, H-conservative.
+
+## 2026-10-07: walking pretrain v1 finished; performance refactor (no method change)
+
+- `ftsr_ref_walk_v1` completed 600 iterations (`logs/rsl_rl/minipi_ftsr_ref_walk/
+  2026-10-07_19-22-*_ftsr_ref_walk_v1`). Evaluation below.
+- Performance refactor of the training hot path. Files: `ftsr_ref/mdp/actions.py`,
+  `ftsr_ref/rl/runner.py`, `ftsr_ref/mdp/stages.py`, `ftsr_ref/mdp/rewards.py`.
+  - Training monitor: per-physics-step `torch.bincount` histograms (torque, qdot,
+    tracking error) replaced by per-joint device accumulators (count, sum/max of
+    |tau|, |qdot|, |q* - q|, counts |qdot| > 3 / > 4, |tau| > rated, |tau| >= 0.95 cap,
+    slew saturation). Training logs now report mean / max / fractions, not p95/p99
+    (those stay in `evaluate.py`, unchanged).
+  - GPU->CPU syncs removed: slew counters (`float(act.sum())`, `float(sat.sum())`
+    every policy step), `bool(self.force.any())` every physics step (now a host-side
+    `_assist_live` flag; one zero-wrench write at t_tag), `float()` of every rollout
+    log value and of `log_assist()` every policy step (device sums, one reduction
+    per iteration), `bool(cost.max() > 0)` every step (device flag, read once),
+    per-step `nonzero()` + `tolist()` episode bookkeeping (device [T, N] buffers, one
+    `tolist()` per iteration, same order), PPO / student loss stats per minibatch,
+    stage fractions (none for a fixed stage; one read instead of two per step for the
+    dynamic stage), masked assignment in `pen_max_velocity` (now `torch.where`).
+  - Per-physics-step `zeros_like` / `full_like` temporaries removed; passive-window
+    gains computed once per policy step.
+  - Remaining syncs: dynamic stage decision (1 per env step, host-side reward
+    weights), adaptive-LR KL comparison (1 per minibatch, release algorithm), mjlab
+    internals (reset / termination indexing).
+- Unchanged: PHYSICS_DT 0.0005, DECIMATION 40, plant, action contract, rewards,
+  observations, PPO / Eq. 5-8 / student MSE, teacher-student split. validate.py 25/25.
+- Benchmark (same command before/after; baseline = b3b273a via stash):
+  `uv run train Mjlab-FTSR-Ref-MiniPi-Walk --env.scene.num-envs 4000
+  --agent.max-iterations 20 --agent.run-name perf_bench_{base,opt}`; medians over
+  iterations 5-18 (first 5 and the final save iteration excluded); tc/tl from the
+  console (0.1 s resolution), total/FPS from TensorBoard `Perf/total_fps`:
+
+  | | collection | learning | total | FPS | GPU util | GPU mem |
+  |---|---|---|---|---|---|---|
+  | before | 3.8 s | 0.2 s | 3.946 s | 24 329 | 90 % | 1770 MiB |
+  | after | 3.2 s | 0.2 s | 3.365 s | 28 527 | 97 % | 1770 MiB |
+
+  Total −14.7 % per iteration (+17.3 % FPS), all in collection. ~3.2 s of
+  collection remains, essentially the 0.5 ms x 40 physics.
