@@ -10,3 +10,4 @@ if any(d.arch < 70 for d in wp.get_cuda_devices()):
   wp.config.enable_mathdx_gemm = False
 
 from minipi_getup.getup.config.minipi import *  # noqa: E402, F401, F403
+import minipi_getup.ftsr_ref.config  # noqa: E402, F401
