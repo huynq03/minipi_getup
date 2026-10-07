@@ -42,6 +42,32 @@ from minipi_getup.ftsr_ref.rl.storage import RolloutStorage
 
 GROUPS = ("actor", "policy", "teacher", "critic")
 
+# Terminal names of the reward terms (``Episode_Reward/<term>``, per-second episode
+# averages from the reward manager), in print order: tracking terms first.
+REWARD_SHORT = {
+  "track_base_height_exp": "height",
+  "track_lin_vel_xy_exp": "lin_vel",
+  "track_ang_vel_yaw_exp": "yaw",
+  "rew_wheel_contact_force": "contact_force",
+  "pen_base_orientation_l2": "orient",
+  "pen_base_orientation_z_l2": "orient_z",
+  "pen_no_fly_l2": "no_fly",
+  "pen_action_rate_l2": "act_rate",
+  "pen_action_smoothness_l2": "act_smooth",
+  "pen_dof_pos_bias_l2": "pos_bias",
+  "pen_two_leg_bias_l2": "leg_bias",
+  "pen_feet_distance_l2": "feet_dist",
+  "pen_dof_pos_limits": "pos_limits",
+  "pen_dof_vel_l2": "dof_vel",
+  "pen_dof_acc_l2": "dof_acc",
+  "pen_max_velocity_l2": "max_vel",
+  "qd_soft_envelope": "qd_envelope",
+  "pen_torques_l2": "torque",
+  "pen_torque_limits": "torque_limits",
+  "pen_joint_power_l2": "power",
+  "pen_termination": "termination",
+}
+
 
 class FtsrRunner:
   def __init__(self, env, train_cfg: dict, log_dir: str | None = None, device="cpu"):
@@ -394,6 +420,27 @@ class FtsrRunner:
       f"{scalars['Policy/mean_noise_std']:.2f} ({tc:.1f}+{tl:.1f}s)",
       flush=True,
     )
+    terms = self._reward_terms(scalars)
+    if terms:
+      half = (len(terms) + 1) // 2
+      lines = (terms[:half], terms[half:]) if len(terms) > 6 else (terms,)
+      for i, part in enumerate(lines):
+        head = "  rewards: " if i == 0 else "           "
+        print(head + " | ".join(part), flush=True)
+
+  @staticmethod
+  def _reward_terms(scalars: dict[str, float]) -> list[str]:
+    """``name +x.xx`` for each logged reward term that is nonzero this iteration
+    (zero-weight terms of the current stage are skipped)."""
+    prefix = "Episode_Reward/"
+    logged = {k[len(prefix) :]: v for k, v in scalars.items() if k.startswith(prefix)}
+    order = [k for k in REWARD_SHORT if k in logged]
+    order += sorted(k for k in logged if k not in REWARD_SHORT)
+    return [
+      f"{REWARD_SHORT.get(k, k)} {logged[k]:+.3f}"
+      for k in order
+      if abs(logged[k]) >= 5e-4
+    ]
 
   def save(self, path: str, infos=None) -> None:
     unwrapped = self.env.unwrapped
