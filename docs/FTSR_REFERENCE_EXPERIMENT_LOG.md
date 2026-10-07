@@ -280,3 +280,9 @@ leave only 7 /m of pull at the current height, hence the smaller step.
   weights (pos_bias -0.14 vs -0.06: -1.3 -> -2.7 /s; dof_acc -2.5e-6) and the new
   0.276 target. Student MSE 0.010 -> 0.053 (new state distribution). qd > 3 4.8 ->
   7.9 %, > 4 0.4 -> 1.5 %, slew 0.45 -> 0.63. No NaN.
+- Stage limit cycle (2 cycles so far): r_s at it 1251-1287 and 1376-1402, each time
+  S1 0.87 -> 0.6 while the policy tries to rise toward 0.276 (S2 up to 0.20-0.26,
+  qd > 3 ~10 %, slew 0.69), then the stateless 2/3 rule drops back to r_u; h_cmd of
+  Eq. 4 falls 0.276 -> 0.19, removing the support of every env between 0.19 and
+  0.276, and S1 crashes to ~0.3 within 1-2 iterations; ~60 iterations to recover.
+  std 0.97 -> 1.03.
