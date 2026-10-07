@@ -299,3 +299,33 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
 - **Outcome: partial.** Speed caps slow the get-up (t_stand +70 %, ω_xy −28 %) but peak
   joint speed stays ~16 rad/s, far from a hardware-friendly get-up, and the run is
   unstable past 7200. Best v1 checkpoint: model_7200 (model_7000 equivalent).
+
+## ftsr_getup_soft_v2 (get-up-first round 2)
+
+- Date: 2026-10-07 ~14:30. Code `6e44234`. Task `Mjlab-FTSR-MiniPi-GetupSoft2`.
+  Resume from `ftsr_getup_soft_v1/model_7200.pt` (last checkpoint before the
+  collapse), 1500 it (7200 → 8700), window `getup:soft`.
+- Changes vs v1: (a) reward, rise schedule: torso height above smoothstep(0.10 →
+  0.345 m over 2.5 s after the settle hold) + 3 cm costs −100/s per metre (ramped over
+  300 it); joint speed cap weight −0.5 → −1.5. (b) Stability: `entropy_coef` 0.01 → 0
+  (CLI), so the action noise stops growing (std 3.08 at 7200).
+  Two families at once, knowingly: (b) alone doesn't slow the get-up, and v1 showed
+  (a) on its own risks the same collapse.
+- Expected: t_stand ≥ 2 s, peak q̇ clearly below v1's ~16 rad/s, success ≥ 95 %, no
+  collapse.
+- Results (stand eval, 3 seeds × 400):
+
+  | it | success | t_stand mean / p90 | peak q̇ | peak v_z | peak ω_xy | τ p99 |
+  |---|---|---|---|---|---|---|
+  | 7300 | 98.3 % | 1.21 / 1.90 s | 16.0 | 1.23 | 10.1 | 8.0 |
+  | 7400 | 98.5 % | 1.49 / 2.34 s | 15.9 | 1.24 | 9.9 | 7.9 |
+
+- Training collapsed again once the terms reached full weight (ramp ends ≈ 7500):
+  return 277 → −109 at 7438 (episode length 538; `low_too_long` terminations), joint
+  speed cost up to −4.4/s, stage manager back to r_u by 7613, stood ≈ 0.6. The noise
+  std stayed ~3.03 (entropy 0 worked), so action noise growth wasn't the only cause.
+- **Outcome: stopped at it 7652; rejected as a training recipe.** Best checkpoint
+  model_7400 (slowest get-up with success ≥ 98 %), but peak joint speed is unchanged
+  at ~16 rad/s. Reward-side speed limits on a policy that already gets up dynamically
+  only stretch the slow phases; when they bind, PPO falls off the get-up instead of
+  finding a gentler motion.
