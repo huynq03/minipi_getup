@@ -401,3 +401,9 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
 - Zero-shot, Gentle model_3500 in the deploy env: 48.7 % (supine 92.7 %, prone 2 %,
   left 62 %, right 38 %), peak q̇ 7.4 / max 9.1 rad/s, τ max 16 Nm.
 - v2: resume Gentle model_3500, 1500 it (3500 → 5000), assist already off.
+- v2 result: stalled without the assist. it 3500 → 3882: return 10–16, standing ≈ 40 %,
+  stage r_u (S1 0.56 → 0.64), τ p99 6.4 Nm, 12.5 Nm penalty ≈ 0. Stopped at 3882
+  (user: "làm lại luôn").
+- v3: weights-only init from Gentle model_3500 (`--agent.init-checkpoint`, so the
+  step counter and the assist schedule restart), assist off at it 1000 of this run
+  (`DEPLOY_ASSIST_END_ITERATION`), 2000 it. Start: F ≈ 16 N, stage r_u.
