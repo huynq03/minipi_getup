@@ -157,3 +157,65 @@ Deterministic student, H-conservative, 16 envs per command, 10 s (8 s measured):
 - Recovery v1: `uv run train Mjlab-FTSR-Ref-MiniPi-Recovery --env.scene.num-envs 4000
   --agent.init-checkpoint /home/huy/minipi_getup/logs/rsl_rl/minipi_ftsr_ref_walk/2026-10-07_20-31-38_ftsr_ref_walk_v1_cont/model_900.pt --agent.run-name ftsr_ref_recovery_v1` (8000
   iterations, assist to 3000, no-assist eval every 500 iterations), tmux getup:ref.
+
+## 2026-10-07: recovery v1 terminal reward breakdown; resumed at 150
+
+- `e43da8b`: logging only. Each iteration prints up to 2 lines of the nonzero
+  `Episode_Reward/*` terms (per-second episode averages already in `extras["log"]`).
+  No reward, PPO, plant, stage or assist change.
+- Recovery v1 stopped right after `model_150.pt` and resumed with the identical
+  configuration (`--agent.resume True --agent.load-run
+  2026-10-07_20-50-29_ftsr_ref_recovery_v1 --agent.load-checkpoint model_150.pt
+  --agent.max-iterations 7850`, run `ftsr_ref_recovery_v1_r150`, log
+  `logs/ftsr_ref_recovery_v1_r150.log`). The checkpoint restores networks, optimizers,
+  lr, iteration and env step counter (assist tc continues 0.950 -> 0.942); only
+  in-flight episodes were reset.
+- Iterations 0-150: stage r_u throughout; height reward 0.03 -> 1.8 /s; mean reward
+  -16 -> -28 (it 40) -> -2.3; S1 0.31-0.34 early then 0.23 at 150, S2 0.12-0.15;
+  F mean ~27-30 N; tau max 16 (cap) on hips/calves, > 6 Nm ~1 % of samples;
+  qd > 3: 11-13 %, > 4: 1.2-1.4 %; slew saturation 0.75; ~3.2 s/iteration,
+  1770 MiB GPU. No NaN.
+
+## 2026-10-07: recovery v1 eval_500 / stopped at 1000 (stage deadlock); v2 fix
+
+Training trend (v1, with assist):
+
+| it | rew | height /s | S1 | S2 | F N | tc | std | qd>3 | qd>4 | slew |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 25 | -19.8 | 1.31 | 0.37 | 0.09 | 26.5 | 0.99 | 0.32 | 0.142 | 0.031 | 0.75 |
+| 100 | -10.4 | 1.84 | 0.32 | 0.13 | 29.7 | 0.97 | 0.36 | 0.130 | 0.017 | 0.78 |
+| 200 | 8.0 | 1.85 | 0.13 | 0.09 | 32.1 | 0.93 | 0.40 | 0.033 | 0.004 | 0.60 |
+| 300 | 12.9 | 2.12 | 0.03 | 0.01 | 35.1 | 0.90 | 0.43 | 0.018 | 0.002 | 0.47 |
+| 499 | 13.2 | 2.00 | 0.01 | 0.00 | 36.1 | 0.83 | 0.51 | 0.016 | 0.001 | 0.44 |
+| 999 | -2.3 | 1.86 | 0.07 | 0.00 | 30.8 | 0.67 | 0.79 | 0.051 | 0.002 | 0.51 |
+
+Stage r_u throughout; tau max 16 (cap) every iteration but > 6 Nm only 0.1-3 %.
+
+eval_500 (no assist, 64 envs/pose, student; teacher identical): success 0 % on all
+poses, never stood. Max base height p90: supine 0.081, prone 0.116, left 0.112, right
+0.112 m (lying 0.069-0.083); 0 % of time above h1. Final: supine sits at 0.05 m with
+upright cos 0.65 (torso raised ~50 deg, seated on the pelvis), prone stays prone
+(cos 0.11), sides 0.05-0.09 m (cos 0.3-0.5). Gentle: qd > 3 0.3-0.7 %, > 4 0-0.1 %
+(but 97-100 % of episodes touch 4 rad/s once), tau max 16 on one hip per pose, near
+cap 0-0.1 %, slew saturation 0.06, joint-limit margin min -0.055..-0.081 rad.
+
+Diagnosis (deadlock):
+1. r_u height reward 4 exp(-|h - h1|/0.0552) peaks exactly at the S_1 threshold h1:
+   dR/dh = +71 /m just below h1 and -71 /m just above, gain 0.18 -> 0.20 m is 0. The
+   optimum puts the population *at* h1, so ">2/3 strictly above h1" is never rewarded;
+   standing (0.345 m) earns 0.24 vs 4.0 at h1, so the walking init's standing envs
+   (S2 0.13 at it 100) were unlearned (S2 -> 0).
+2. Eq. 4 is clamped to 0 at h_cmd = h1 and carries 0.5-0.6 m g just below it (36 N at
+   ~0.156 m with tc 0.83); the cheapest point of the kernel's slope is to hang on the
+   assistance below h1. Without assistance the policy does not lift off at all.
+v1 after 500: std 0.51 -> 0.79, reward 13 -> -2, still r_u: stopped at model_1000.
+
+Fix (one change, recovery v2): r_u height-reward target 0.19 -> 0.214 m = h1 x
+0.45/0.40, the release's ratio of the height target active at its g2->g3 switch to
+that switch (the release decouples target and group). REFERENCE-consistent (release
+semantics; paper ties h_cmd to both; PAPER_AMBIGUITY resolved toward the release).
+Unchanged: S_1/S_2 thresholds, 2/3 rule, Eq. 4 h_cmd (= h1), all weights, sigma,
+PPO, std, plant, slew, physics, assist schedule, teacher/student. Landscape with
+target 0.214: dR/dh = +46 /m below and +48 /m above h1, gain 0.18 -> 0.20 = +0.95,
+R(0.156) 1.41 (pull 25 /m, was 39), standing 0.37. Larger targets (0.285 = 1.5 h1)
+leave only 7 /m of pull at the current height, hence the smaller step.

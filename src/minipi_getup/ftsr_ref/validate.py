@@ -28,6 +28,7 @@ from minipi_getup.ftsr_ref.config.env_cfg import (
   PASSIVE_STEPS,
   RAW_CLIP,
   STAGE_HEIGHTS,
+  STAGE_REWARD_HEIGHTS,
 )
 from minipi_getup.ftsr_ref.config.robot import (
   H_CONSERVATIVE,
@@ -588,6 +589,7 @@ def t18_stage(_):
   env.step(torch.zeros(16, 12, device=DEV))
   st = env.extras["ftsr_stage"]
   lying = st.stage == 0 and abs(st.h_cmd - h1) < 1e-9
+  lying &= abs(st.h_reward - STAGE_REWARD_HEIGHTS[0]) < 1e-9 and st.h_reward > h1
   env.close()
   env = make_env(WALK, 4)
   env.step(torch.zeros(4, 12, device=DEV))
@@ -596,7 +598,7 @@ def t18_stage(_):
   ok = all(cases) and lying and walk
   return ok, (
     f"2/3 rule at 199/201 of 300 (h1 {h1}, h2 {h2:.3f}): {cases}; lying population -> "
-    f"r_u (h_cmd {h1}) {lying}; walk task fixed r_w {walk}"
+    f"r_u (h_cmd {h1}, reward target {st.h_reward:.4f}) {lying}; walk task fixed r_w {walk}"
   )
 
 

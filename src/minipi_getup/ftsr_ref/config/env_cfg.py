@@ -80,6 +80,11 @@ DECIMATION = 40
 EPISODE_LENGTH_S = 20.0
 PASSIVE_STEPS = 100  # 2.0 s settle in deploy Passive (release: 30 steps = 0.6 s)
 STAGE_HEIGHTS = (0.19, 0.6 * LENGTH_RATIO, STANCE_HEIGHT)
+# Height-reward targets (recovery v2). Only r_u differs: its target lies above the S_1
+# threshold h1 by the release's ratio of the height target active at its g2->g3 switch
+# to that switch (0.45 m / 0.40 m), 0.19 * 1.125 = 0.214 m. The v1 run (target = h1)
+# settled just below h1 (experiment log). Eq. 4 and the thresholds keep STAGE_HEIGHTS.
+STAGE_REWARD_HEIGHTS = (STAGE_HEIGHTS[0] * 0.45 / 0.40, *STAGE_HEIGHTS[1:])
 
 ACTION_SCALE = {
   r".*_hip_pitch_joint": 0.6,
@@ -236,7 +241,9 @@ def recovery_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.events["stage_setup"] = EventTermCfg(
     func=mdp.stage_setup,
     mode="startup",
-    params={"stage": mdp.StageCfg(heights=STAGE_HEIGHTS)},
+    params={
+      "stage": mdp.StageCfg(heights=STAGE_HEIGHTS, reward_heights=STAGE_REWARD_HEIGHTS)
+    },
   )
   cfg.events["reset_pose"] = EventTermCfg(
     func=mdp.reset_pose,

@@ -117,9 +117,9 @@ def pen_base_orientation_z_l2(env) -> torch.Tensor:
 
 @staged
 def track_base_height_exp(env, sigma: float) -> torch.Tensor:
-  """exp(-|h - h_cmd| / sigma), h_cmd of the current stage."""
-  h_cmd = get_stage_state(env).h_cmd
-  return torch.exp(-torch.abs(_base_height(env) - h_cmd) / sigma)
+  """exp(-|h - h_t| / sigma), h_t = height-reward target of the current stage."""
+  h_t = get_stage_state(env).h_reward
+  return torch.exp(-torch.abs(_base_height(env) - h_t) / sigma)
 
 
 class pen_dof_acc_l2(StagedTerm):

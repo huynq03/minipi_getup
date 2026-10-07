@@ -208,6 +208,24 @@ def _attach(env, rec: Recorder):
   env.sim.step = hooked
 
 
+def _height_summary(h: torch.Tensor, up: torch.Tensor, last: int) -> dict:
+  """Base height / uprightness after the passive window (rows = envs of one pose).
+  ``final`` = mean over the last ``last`` steps of each episode."""
+  hf = h[:, -last:].mean(-1)
+  uf = up[:, -last:].mean(-1)
+  hmax = h.amax(-1)
+  q = torch.tensor([0.1, 0.5, 0.9], device=h.device)
+  return {
+    "height_final_p10_p50_p90": hf.quantile(q).tolist(),
+    "height_max_p10_p50_p90": hmax.quantile(q).tolist(),
+    "frac_time_above_h1": float((h > STAGE_HEIGHTS[0]).float().mean()),
+    "frac_time_above_h2": float((h > STAGE_HEIGHTS[1]).float().mean()),
+    "frac_envs_final_above_h1": float((hf > STAGE_HEIGHTS[0]).float().mean()),
+    "upright_cos_final_mean": float(uf.mean()),
+    "frac_envs_final_upright": float((uf > STAND_UP).float().mean()),
+  }
+
+
 def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> dict:
   npose = len(FALLEN_POSE_NAMES)
   n = per_pose * npose
@@ -225,6 +243,7 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
   T = int(env.max_episode_length) - 1
   hist = torch.zeros(n, T, dtype=torch.bool, device=DEV)
   heights = torch.zeros(n, T, device=DEV)
+  ups = torch.zeros(n, T, device=DEV)
   t.monitor.clear()
   obs = env.get_observations()
   with torch.no_grad():
@@ -240,6 +259,7 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
       up = -d.projected_gravity_b[:, 2]
       hist[:, k] = (h > STAND_H) & (up > STAND_UP)
       heights[:, k] = h
+      ups[:, k] = up
   dt = env.step_dt
   passive = t.cfg.passive_steps
   last = int(3.0 / dt)
@@ -268,6 +288,7 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
       "fell_after_standing": float(fell[rows].float().mean()),
       "time_to_stand_s_mean": float(tts.mean()) if tts.numel() else None,
       "time_to_stand_s_p90": float(tts.quantile(0.9)) if tts.numel() else None,
+      **_height_summary(heights[rows, passive:], ups[rows, passive:], last),
       **rec.group_summary(g, rows),
     }
   out["success_min_pose"] = min(v["success"] for v in out["per_pose"].values())

@@ -13,6 +13,14 @@ as the release's ``_reward_update`` (it can fall back to an earlier stage). Bein
 pure function of the current state, nothing has to be checkpointed: a resumed run
 recomputes the same stage from the same population.
 
+Height reward target vs stage target (recovery v2, REFERENCE-consistent): the
+paper uses ``h_cmd`` both as the stage's height-reward target and as the next stage's
+threshold, so the r_u reward peaks exactly at h1 and gives no incentive across it
+(recovery v1 deadlock, experiment log). The release decouples the two (its height
+target is set from the population mean and lies above its g2->g3 switch). Optional
+``reward_heights`` therefore sets the height-reward target per stage; the Eq. 4
+assistance and the S_1/S_2 thresholds keep using ``heights``.
+
 The stage is computed once per env step, at the first reward evaluation (rewards are
 the first consumer after physics), and cached by ``common_step_counter``. The Eq. 4
 assistance of the next step reads the cached ``h_cmd``.
@@ -38,6 +46,8 @@ class StageCfg:
   heights: tuple[float, float, float]
   """(h1_cmd, h2_cmd, h3_cmd), m."""
   fraction: float = 2.0 / 3.0
+  reward_heights: tuple[float, float, float] | None = None
+  """Height-reward target per stage; None = ``heights`` (paper)."""
   fixed_stage: int | None = None
   """Force one stage (2 = r_w for the walking initialization)."""
 
@@ -77,6 +87,11 @@ class StageState:
   def h_cmd(self) -> float:
     return self.cfg.heights[self.stage]
 
+  @property
+  def h_reward(self) -> float:
+    """Height-reward target of the current stage."""
+    return (self.cfg.reward_heights or self.cfg.heights)[self.stage]
+
   def update(self, env: ManagerBasedRlEnv) -> int:
     if self.step != env.common_step_counter:
       self.step = env.common_step_counter
@@ -85,6 +100,7 @@ class StageState:
       log = env.extras.setdefault("log", {})
       log["Stage/stage"] = float(self.stage)
       log["Stage/h_cmd"] = self.h_cmd
+      log["Stage/h_reward"] = self.h_reward
       log["Stage/frac_above_h1"] = self.s1
       log["Stage/frac_above_h2"] = self.s2
     return self.stage
