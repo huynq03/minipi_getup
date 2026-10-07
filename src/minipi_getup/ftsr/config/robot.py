@@ -7,8 +7,10 @@ stays a hardware ceiling, not something the policy may learn to rely on. The sha
 asset definition isn't changed.
 """
 
+import math
 from dataclasses import replace
 
+from mjlab.actuator import DcMotorActuatorCfg
 from mjlab.entity import EntityCfg
 
 from minipi_getup.asset_zoo.robots.hightorque_minipi.minipi_constants import (
@@ -40,6 +42,41 @@ def get_ftsr_robot_cfg(torque_limit: float = OPERATIONAL_TORQUE_LIMIT) -> Entity
     cfg.articulation,
     actuators=tuple(
       replace(a, effort_limit=torque_limit) for a in cfg.articulation.actuators
+    ),
+  )
+  return cfg
+
+
+# HTDW-5036-02 joint module (Mini-Pi), datasheet values supplied by the user
+# (2026-10-07; the public product page confirms the module name and the 16 Nm robot
+# maximum only): rated 6 Nm at 50 rpm, locked-rotor 21 Nm, no-load 75 rpm, 36:1.
+HTDW5036_STALL_TORQUE = 21.0  # Nm
+HTDW5036_NO_LOAD_SPEED = 75.0 * 2.0 * math.pi / 60.0  # 7.85 rad/s at the joint
+
+
+def get_ftsr_dc_robot_cfg(effort_limit: float = MINIPI_EFFORT_LIMIT) -> EntityCfg:
+  """Mini-Pi with a DC motor torque-speed curve instead of a flat torque cap.
+
+  tau_max(qd) = min(effort_limit, 21 (1 - |qd| / 7.85)), the linear curve through the
+  datasheet's stall torque and no-load speed (it gives 7.0 Nm at the rated 5.24 rad/s,
+  close to the rated 6 Nm). The PD law (same kp/kd as the builtin actuators) runs in
+  torch every physics step. ``effort_limit`` defaults to the 16 Nm the real motors
+  allow: the deployment runs the motors' own PD with no torque clamp.
+  """
+  cfg = get_minipi_robot_cfg()
+  assert cfg.articulation is not None
+  cfg.articulation = replace(
+    cfg.articulation,
+    actuators=tuple(
+      DcMotorActuatorCfg(
+        target_names_expr=a.target_names_expr,
+        stiffness=a.stiffness,
+        damping=a.damping,
+        effort_limit=effort_limit,
+        saturation_effort=HTDW5036_STALL_TORQUE,
+        velocity_limit=HTDW5036_NO_LOAD_SPEED,
+      )
+      for a in cfg.articulation.actuators
     ),
   )
   return cfg

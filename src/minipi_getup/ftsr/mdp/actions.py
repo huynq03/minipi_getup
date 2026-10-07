@@ -104,6 +104,14 @@ class FtsrJointPositionActionCfg(RelativeJointPositionActionCfg):
   operational_torque_limit: float = 9.0
   """Effort envelope used for the saturation statistic (|tau| >= 0.9 x limit)."""
 
+  max_action_step: float = 0.0
+  """If > 0: the action moves at most this far per policy step from the previous
+  (limited) action, and the settle hold forces it to 0. ``raw_action`` is the limited
+  action, so ``last_action(action_name=...)`` observes what was executed. Unlike
+  ``max_target_step`` this needs no state beyond ``last_action``, so the same clamp
+  can run inside the exported policy (deployment feeds back its raw output, starting
+  from 0). 0 disables it."""
+
   max_target_step: float = 0.0
   """If > 0: the joint target moves at most this far (rad) per policy step, from the
   previous target (from the measured pose after a reset). A hard rate limit that the
@@ -124,7 +132,19 @@ class FtsrJointPositionAction(RelativeJointPositionAction):
       len(self._target_ids), cfg.operational_torque_limit, env.device
     )
 
+  def _settling(self) -> torch.Tensor:
+    in_window = self._env.episode_length_buf < self.cfg.settle_steps
+    return in_window & self._env.extras.get("settle_mask", in_window)
+
   def process_actions(self, actions: torch.Tensor) -> None:
+    if self.cfg.max_action_step > 0:
+      prev = self._raw_actions  # Previous limited action; 0 after a reset.
+      step = self.cfg.max_action_step
+      actions = torch.clamp(actions, min=prev - step, max=prev + step)
+      if self.cfg.settle_steps > 0:
+        actions = torch.where(
+          self._settling().unsqueeze(-1), torch.zeros_like(actions), actions
+        )
     super().process_actions(actions)
     q = self._entity.data.joint_pos[:, self._target_ids]
     if self.cfg.relative:
@@ -133,9 +153,7 @@ class FtsrJointPositionAction(RelativeJointPositionAction):
       default = self._entity.data.default_joint_pos[:, self._target_ids]
       target = default + self._processed_actions
     if self.cfg.settle_steps > 0:
-      in_window = self._env.episode_length_buf < self.cfg.settle_steps
-      marked = self._env.extras.get("settle_mask", in_window)
-      target = torch.where((in_window & marked).unsqueeze(-1), q, target)
+      target = torch.where(self._settling().unsqueeze(-1), q, target)
     if self.cfg.max_target_step > 0:
       prev = torch.where(self._fresh.unsqueeze(-1), q, self._target)
       step = self.cfg.max_target_step

@@ -42,6 +42,7 @@ from minipi_getup.ftsr.config.robot import (
   OPERATIONAL_TORQUE_LIMIT,
   STANCE_COM_HEIGHT,
   STANCE_FEET_WIDTH,
+  get_ftsr_dc_robot_cfg,
   get_ftsr_robot_cfg,
 )
 from minipi_getup.ftsr.config.stage_rewards import (
@@ -456,6 +457,8 @@ def ftsr_env_cfg(
   stand_only: bool = False,
   torque_limit: float = OPERATIONAL_TORQUE_LIMIT,
   max_target_step: float = 0.0,
+  dc_motor_effort_limit: float | None = None,
+  max_action_step: float = 0.0,
 ) -> ManagerBasedRlEnvCfg:
   """Full FTSR task. ``stage_weight_overrides`` builds tuning variants.
 
@@ -463,6 +466,11 @@ def ftsr_env_cfg(
   only has to stand (get-up-first variants). ``torque_limit`` sets the actuator
   envelope (Nm) and ``max_target_step`` the joint target rate limit (rad per policy
   step, 0 = off).
+
+  ``dc_motor_effort_limit`` switches the actuators to the HTDW-5036 torque-speed
+  curve capped at that torque (the real motors' cap), and ``torque_limit`` becomes
+  the envelope the ``torque_limit`` term penalizes above. ``max_action_step`` is the
+  deployable rate limit (action units per policy step, from ``last_action``).
   """
   weights = _stage_weights(stage_weight_overrides)
   cfg = _base_cfg(play, weights)
@@ -471,6 +479,15 @@ def ftsr_env_cfg(
     cfg.actions["joint_pos"].operational_torque_limit = torque_limit
     cfg.rewards["torque_limit"].params["limit"] = 0.8 * torque_limit
   cfg.actions["joint_pos"].max_target_step = max_target_step
+  if dc_motor_effort_limit is not None:
+    cfg.scene.entities["robot"] = get_ftsr_dc_robot_cfg(dc_motor_effort_limit)
+    cfg.actions["joint_pos"].operational_torque_limit = torque_limit
+    cfg.rewards["torque_limit"].params["limit"] = torque_limit
+  if max_action_step > 0:
+    cfg.actions["joint_pos"].max_action_step = max_action_step
+    # Observe the executed (limited) action, as the deployment feeds back.
+    for group in ("actor", "student"):
+      cfg.observations[group].terms["actions"].params = {"action_name": "joint_pos"}
   if stand_only:
     twist = cfg.commands["twist"]
     twist.rel_standing_envs = 1.0

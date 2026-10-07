@@ -4,6 +4,7 @@ Each variant is one hypothesis, one parameter family (docs/FTSR_EXPERIMENT_LOG.m
 The faithful reproduction ``Mjlab-FTSR-MiniPi`` is never changed by these.
 """
 
+from minipi_getup.ftsr.config.env_cfg import ACTION_SCALE
 from minipi_getup.ftsr.config.stage_rewards import STAGE_WEIGHTS
 
 # Round 1, recovery-phase motion regularization. The faithful policy got up in ~1 s
@@ -66,3 +67,15 @@ GETUP_SOFT_V2 = {
 # fast targets. Rewards: faithful stage table, zero commands.
 GENTLE_TORQUE_LIMIT = 12.5
 GENTLE_TARGET_STEP = 0.1
+
+# Get-up-first round 4 (deployable): the env matches what mini_pi_fsm can run with a
+# config-only policy package. (a) HTDW-5036 torque-speed curve (21 Nm stall, 7.85
+# rad/s no-load) with the motors' real 16 Nm cap, since deployment doesn't clamp
+# torque; the user's 12.5 Nm envelope becomes a penalty (|tau| above it, -1/s per Nm).
+# (b) The rate limit moves from the joint target to the action, measured from
+# last_action and starting at 0, so the exported ONNX can apply the very same clamp:
+# 0.4 action units = 0.1 rad of target per 20 ms step. Fine-tunes GetupGentle v1.
+DEPLOY_TORQUE_ENVELOPE = 12.5
+DEPLOY_MOTOR_CAP = 16.0
+DEPLOY_ACTION_STEP = GENTLE_TARGET_STEP / ACTION_SCALE
+GETUP_DEPLOY = {"torque_limit": (-1.0, -1.0, -1.0)}

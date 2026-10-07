@@ -5,8 +5,12 @@ from mjlab.tasks.registry import register_mjlab_task
 from minipi_getup.ftsr.config.env_cfg import ftsr_env_cfg, ftsr_walk_env_cfg
 from minipi_getup.ftsr.config.rl_cfg import ftsr_runner_cfg, ftsr_walk_runner_cfg
 from minipi_getup.ftsr.config.tuning import (
+  DEPLOY_ACTION_STEP,
+  DEPLOY_MOTOR_CAP,
+  DEPLOY_TORQUE_ENVELOPE,
   GENTLE_TARGET_STEP,
   GENTLE_TORQUE_LIMIT,
+  GETUP_DEPLOY,
   GETUP_SOFT,
   GETUP_SOFT_V2,
   SMOOTH_V1,
@@ -79,6 +83,26 @@ register_mjlab_task(
     torque_limit=GENTLE_TORQUE_LIMIT,
     max_target_step=GENTLE_TARGET_STEP,
   ),
+  rl_cfg=ftsr_runner_cfg(),
+  runner_cls=FtsrRunner,
+)
+
+
+def _getup_deploy_cfg(play: bool):
+  return ftsr_env_cfg(
+    play=play,
+    stage_weight_overrides=GETUP_DEPLOY,
+    stand_only=True,
+    torque_limit=DEPLOY_TORQUE_ENVELOPE,
+    dc_motor_effort_limit=DEPLOY_MOTOR_CAP,
+    max_action_step=DEPLOY_ACTION_STEP,
+  )
+
+
+register_mjlab_task(
+  task_id="Mjlab-FTSR-MiniPi-GetupDeploy",
+  env_cfg=_getup_deploy_cfg(play=False),
+  play_env_cfg=_getup_deploy_cfg(play=True),
   rl_cfg=ftsr_runner_cfg(),
   runner_cls=FtsrRunner,
 )
