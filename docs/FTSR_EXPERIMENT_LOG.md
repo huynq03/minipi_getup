@@ -415,3 +415,15 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
   v2 sat in r_u too. Stopped at 639.
 - v4: as v3 plus the stage fixed at r_w (`DEPLOY_FIXED_STAGE = 2`). Start (it 127):
   return 93, S1 0.95, S2 0.49, F 17.6 N.
+- v4 result (finished it 1999; quick stand eval, seed 0 × 400, deploy env, no assist):
+
+  | it | success | supine | prone | left | right | t_stand | peak q̇ | peak v_z | peak ω_xy | τ p99 |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | 600 | 0 % | 0 | 0 | 0 | 0 | – | 7.0 | – | 3.6 | 5.6 |
+  | 1500 | 52.5 % | 99 % | 0 % | 58 % | 53 % | 1.05 s | 7.2 | 0.64 | 7.0 | 6.6 |
+  | 2000 | 53.0 % | 99 % | 0 % | 59 % | 54 % | 0.91 s | 7.2 | 0.68 | 7.3 | 7.0 |
+
+  Training plateaued from ~1400 (standing ≈ 0.55). No better than the zero-shot Gentle
+  policy (48.7 %). Under the HTDW-5036 curve + 5 rad/s target rate, prone recovery is
+  never found and the side poses stay near 55 %. **Outcome: not deployable** (criteria:
+  ≥ 95 %, all four poses). Stopped here pending the user's decision.
