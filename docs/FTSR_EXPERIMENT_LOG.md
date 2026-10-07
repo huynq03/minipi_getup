@@ -242,3 +242,60 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
   0 → −1.0.
 - Expected: peak joint speed / roll-pitch rate and the torque p99 (recovery and walking)
   down, time to stand up, success ≥ 98 %, walking tracking roughly unchanged.
+- **Outcome: stopped at it ≈ 5246, not evaluated.** The user re-prioritized
+  (2026-10-07 ~13:30): optimize the get-up first, because a sub-second get-up can't be
+  tried on hardware. r_w motion regularization targets walking, so the run was dropped.
+
+## Play viewer fix (`4972a6a`)
+
+- `uv run play ... --viewer viser` crashed building the velocity joystick GUI: viser's
+  "Max lin_vel_y" slider needs an initial value in [0.1, 10], and the FTSR command
+  keeps lin_vel_y at (0, 0). `FtsrVelocityCommand` widens only the GUI limits; sampling
+  is unchanged.
+- Observation from the viewer: after getting up the robot looked unstable. Measured
+  with 400 envs: under a zero command it stands still (rms ω_xy 0.03 rad/s, tilt 1°,
+  no stepping). The visible motion is walking under the random play commands (90 % of
+  envs): it shuffles without lifting the feet (feet airborne 0–5 %), rocking at rms
+  ω_xy 0.5–1 rad/s, and barely turns. Locomotion quality remains a known weakness.
+
+## Get-up-first evaluation protocol
+
+- `evaluate.py --commands stand`: every env gets the zero command (column `commands`).
+  Baseline faithful `ftsr_repro_v1_cont3000/model_6000.pt` under it (3 seeds × 400):
+  success 99.8 %, t_stand 0.73 s (p90 1.1), peak q̇ 16.9 rad/s (max 23.6), peak v_z
+  1.38 m/s, peak ω_xy 13.8 rad/s, recovery τ p99 8.2 Nm (sat 1.15 %).
+- Time profile (model_6000): the 0.5 s settle hold has q̇ ≤ 4 rad/s; the peaks
+  (12–14 rad/s) are the policy's own motion between 0.4 and 1.5 s.
+
+## ftsr_getup_soft_v1 (get-up-first round 1)
+
+- Date: 2026-10-07 13:46. Code `b5051f0`. Task `Mjlab-FTSR-MiniPi-GetupSoft`.
+  Resume from `ftsr_repro_v1_cont3000/model_6000.pt`, 1500 it (6000 → 7500). Two
+  earlier launches in the same tmux window were stopped by a `KeyboardInterrupt` from
+  the attached client (logs `train_ftsr_getup_soft_v1_interrupted*.log`), so the run
+  moved to window `getup:soft`.
+- Changes: zero velocity commands (`stand_only`); soft speed caps, squared excess over
+  joint speed 4 rad/s (−0.5), torso v_z 0.3 m/s (−50), roll/pitch rate 1.5 rad/s
+  (−1.0), all stages, ramped in over 300 it.
+- Hypothesis: in r_w each second upright earns ≈ 16 (height + zero-command tracking),
+  so rising early always pays; caps sized to cost more than that for the faithful
+  peaks would slow the get-up.
+- Results (stand eval, 3 seeds × 400):
+
+  | it | success | t_stand mean / p90 | peak q̇ | peak v_z | peak ω_xy | τ p99 |
+  |---|---|---|---|---|---|---|
+  | 6000 (base) | 99.8 % | 0.73 / 1.10 s | 16.9 | 1.38 | 13.8 | 8.2 |
+  | 6500 | 99.3 % | 0.91 / 1.44 s | 16.9 | 1.34 | 11.4 | 8.2 |
+  | 7000 | 99.1 % | 1.30 / 2.04 s | 15.8 | 1.22 | 10.1 | 8.0 |
+  | 7200 | 98.9 % | 1.25 / 1.88 s | 15.9 | 1.22 | 9.9 | 7.9 |
+  | 7250 | 63.3 % | 1.23 / 1.76 s | 14.1 | 1.05 | 7.4 | 5.4 |
+  | 7500 | 58.6 % (prone 2.7 %) | 1.19 / 1.58 s | 13.4 | 1.00 | 5.9 | 5.0 |
+
+- Collapse at it ≈ 7250: training return 242 → −50 within 40 it, prone get-up lost,
+  stage manager fell back to r_s/r_u by 7480. KL spiked to 0.035/0.048 (target 0.01)
+  while the adaptive LR was already ~1e-5–1e-4. The action noise std had grown
+  steadily from 2.7 to 3.15 under the 0.01 entropy bonus (with a 0.25 action scale,
+  ±0.8 rad of target noise), so rollouts were very noisy.
+- **Outcome: partial.** Speed caps slow the get-up (t_stand +70 %, ω_xy −28 %) but peak
+  joint speed stays ~16 rad/s, far from a hardware-friendly get-up, and the run is
+  unstable past 7200. Best v1 checkpoint: model_7200 (model_7000 equivalent).

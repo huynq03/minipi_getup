@@ -4,7 +4,12 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from minipi_getup.ftsr.config.env_cfg import ftsr_env_cfg, ftsr_walk_env_cfg
 from minipi_getup.ftsr.config.rl_cfg import ftsr_runner_cfg, ftsr_walk_runner_cfg
-from minipi_getup.ftsr.config.tuning import GETUP_SOFT, SMOOTH_V1, SMOOTH_V2
+from minipi_getup.ftsr.config.tuning import (
+  GETUP_SOFT,
+  GETUP_SOFT_V2,
+  SMOOTH_V1,
+  SMOOTH_V2,
+)
 from minipi_getup.ftsr.rl import FtsrRunner
 
 register_mjlab_task(
@@ -44,6 +49,16 @@ register_mjlab_task(
   env_cfg=ftsr_env_cfg(stage_weight_overrides=GETUP_SOFT, stand_only=True),
   play_env_cfg=ftsr_env_cfg(
     play=True, stage_weight_overrides=GETUP_SOFT, stand_only=True
+  ),
+  rl_cfg=ftsr_runner_cfg(),
+  runner_cls=FtsrRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-FTSR-MiniPi-GetupSoft2",
+  env_cfg=ftsr_env_cfg(stage_weight_overrides=GETUP_SOFT_V2, stand_only=True),
+  play_env_cfg=ftsr_env_cfg(
+    play=True, stage_weight_overrides=GETUP_SOFT_V2, stand_only=True
   ),
   rl_cfg=ftsr_runner_cfg(),
   runner_cls=FtsrRunner,

@@ -294,3 +294,35 @@ class motion_speed_excess:
     self._calls += 1
     ramp = 1.0 if ramp_steps <= 0 else min(1.0, self._calls / ramp_steps)
     return ramp * torch.square(torch.relu(x.abs() - limit)).sum(dim=-1)
+
+
+class height_ahead_of_schedule:
+  """Torso height above a slow rise schedule: relu(h - h_ref(t)), ramped in.
+
+  ``t`` is the time since the settle hold ended. ``h_ref`` rises from ``h_start`` to
+  ``h_end`` over ``rise_time`` s along a smoothstep, plus ``margin``. Rising faster
+  than the schedule costs reward, so getting up early stops paying (every second
+  upright otherwise earns the height and tracking rewards). Rising slower costs
+  nothing here.
+  """
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv):
+    self._calls = 0
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    h_start: float,
+    h_end: float,
+    rise_time: float,
+    settle_steps: int,
+    margin: float = 0.0,
+    ramp_steps: int = 0,
+    asset_cfg: SceneEntityCfg = _TORSO,
+  ) -> torch.Tensor:
+    t = (env.episode_length_buf.float() - settle_steps) * env.step_dt
+    x = (t / rise_time).clamp(0.0, 1.0)
+    h_ref = h_start + (h_end - h_start) * x * x * (3.0 - 2.0 * x) + margin
+    self._calls += 1
+    ramp = 1.0 if ramp_steps <= 0 else min(1.0, self._calls / ramp_steps)
+    return ramp * torch.relu(_torso_height(env, asset_cfg) - h_ref)

@@ -43,3 +43,15 @@ GETUP_SOFT = {
   "base_vz_excess": (-50.0, -50.0, -50.0),
   "base_wxy_excess": (-1.0, -1.0, -1.0),
 }
+
+# Get-up-first round 2. GetupSoft v1 (speed caps only) slowed the get-up from 0.73 s
+# to ~1.3 s, but peak joint speed stayed ~16 rad/s: the incentive to rise early (height
+# and tracking rewards for every second upright) still outweighed the caps. v2 removes
+# that incentive at its source with a rise schedule (stance height reached 2.5 s after
+# the settle hold; height above schedule + 3 cm is penalized) and triples the joint
+# speed cap weight. Fine-tunes the v1 policy.
+GETUP_SOFT_V2 = {
+  **GETUP_SOFT,
+  "joint_vel_excess": (-1.5, -1.5, -1.5),
+  "height_schedule": (-100.0, -100.0, -100.0),
+}

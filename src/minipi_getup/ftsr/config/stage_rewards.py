@@ -69,6 +69,8 @@ STAGE_WEIGHTS: dict[str, tuple[float, float, float]] = {
   "joint_vel_excess": (0.0, 0.0, 0.0),
   "base_vz_excess": (0.0, 0.0, 0.0),
   "base_wxy_excess": (0.0, 0.0, 0.0),
+  # Torso above a slow rise schedule (HEIGHT_SCHEDULE); off in the faithful task.
+  "height_schedule": (0.0, 0.0, 0.0),
 }
 
 # Speed above which the *_excess terms penalize (squared excess). Chosen for a get-up
@@ -77,3 +79,12 @@ STAGE_WEIGHTS: dict[str, tuple[float, float, float]] = {
 SPEED_CAPS = {"joint_vel": 4.0, "base_vz": 0.3, "base_wxy": 1.5}
 # The caps' weights ramp in linearly over this many iterations after (re)start.
 SPEED_CAP_RAMP_ITERATIONS = 300
+
+# Rise schedule for the height_schedule term: torso height from lying to stance over
+# RISE_TIME s after the settle hold (smoothstep), plus a margin.
+HEIGHT_SCHEDULE = {
+  "h_start": 0.10,
+  "h_end": STANCE_HEIGHT,
+  "rise_time": 2.5,
+  "margin": 0.03,
+}

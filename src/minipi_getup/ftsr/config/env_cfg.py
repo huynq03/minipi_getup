@@ -47,6 +47,7 @@ from minipi_getup.ftsr.config.robot import (
 from minipi_getup.ftsr.config.stage_rewards import (
   ANG_VEL_KERNEL,
   HEIGHT_KERNEL,
+  HEIGHT_SCHEDULE,
   LIN_VEL_KERNEL,
   SPEED_CAP_RAMP_ITERATIONS,
   SPEED_CAPS,
@@ -272,6 +273,16 @@ def _rewards(
       )
       for quantity, limit in SPEED_CAPS.items()
     },
+    "height_schedule": RewardTermCfg(
+      func=mdp.height_ahead_of_schedule,
+      weight=0.0,
+      params={
+        **HEIGHT_SCHEDULE,
+        "settle_steps": SETTLE_STEPS,
+        "ramp_steps": SPEED_CAP_RAMP_ITERATIONS * STEPS_PER_ITERATION,
+        "asset_cfg": _TORSO,
+      },
+    ),
   }
   assert set(terms) == set(weights)
   for name, term in terms.items():
