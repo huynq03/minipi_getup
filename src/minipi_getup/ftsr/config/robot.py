@@ -52,6 +52,11 @@ def get_ftsr_robot_cfg(torque_limit: float = OPERATIONAL_TORQUE_LIMIT) -> Entity
 # maximum only): rated 6 Nm at 50 rpm, locked-rotor 21 Nm, no-load 75 rpm, 36:1.
 HTDW5036_STALL_TORQUE = 21.0  # Nm
 HTDW5036_NO_LOAD_SPEED = 75.0 * 2.0 * math.pi / 60.0  # 7.85 rad/s at the joint
+# Reflected rotor inertia (kg m^2). Not in the datasheet; ~1e-5 kg m^2 for a 50 mm
+# rotor x 36^2 gives ~0.013. Also required numerically: the torch PD law is explicit,
+# and without armature the light links chatter at up to ~40 rad/s while holding still
+# at the 2 ms timestep (0.005 already stabilizes it).
+HTDW5036_ARMATURE = 0.01
 
 
 def get_ftsr_dc_robot_cfg(effort_limit: float = MINIPI_EFFORT_LIMIT) -> EntityCfg:
@@ -75,6 +80,7 @@ def get_ftsr_dc_robot_cfg(effort_limit: float = MINIPI_EFFORT_LIMIT) -> EntityCf
         effort_limit=effort_limit,
         saturation_effort=HTDW5036_STALL_TORQUE,
         velocity_limit=HTDW5036_NO_LOAD_SPEED,
+        armature=HTDW5036_ARMATURE,
       )
       for a in cfg.articulation.actuators
     ),
