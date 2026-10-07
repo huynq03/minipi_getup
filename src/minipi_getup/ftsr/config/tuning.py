@@ -17,3 +17,15 @@ SMOOTH_V1 = {
   "dof_vel": (-0.05, -0.05, STAGE_WEIGHTS["dof_vel"][2]),
   "torque_limit": (-2.0, -2.0, -2.0),
 }
+
+# Round 2, motion regularization in the stage that actually shapes the get-up. From
+# it ~815 the population is in r_w, so every get-up afterwards is optimized under the
+# walking weights. Round 1 changed r_u/r_s (no effect once in r_w) and, applied from
+# scratch, stopped the get-up from ever being discovered. Round 2 fine-tunes the
+# faithful policy (resumed at it 4000, assist already off) with a stronger r_w joint
+# speed cost (walking runs at ~1-2 rad/s, the get-up peaks at 17 rad/s) and the soft
+# torque-limit term (walking torque p99 was ~8 Nm against the 9 Nm cap).
+SMOOTH_V2 = {
+  "dof_vel": (*STAGE_WEIGHTS["dof_vel"][:2], -0.04),
+  "torque_limit": (0.0, 0.0, -1.0),
+}
