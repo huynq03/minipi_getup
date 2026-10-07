@@ -1,0 +1,333 @@
+{
+  "timing": {
+    "ok": true,
+    "detail": {
+      "control_substep_dt (Isaac sim.dt)": 0.005,
+      "mujoco_timestep": 0.0025,
+      "mujoco_steps_per_control_substep": 2,
+      "decimation": 4,
+      "policy_dt": 0.02,
+      "max_episode_length": 500.0,
+      "episode_steps_incl_timeout_step": 501,
+      "unactuated_steps": 30.0,
+      "unactuated_s": 0.6
+    }
+  },
+  "unactuated_period": {
+    "ok": true,
+    "detail": {
+      "steps_checked": 29,
+      "max_|obs|": 0.0,
+      "max_|action|": 0.0,
+      "real_episode_length_after": 30
+    }
+  },
+  "first_observed_and_actuated_step": {
+    "ok": true,
+    "detail": {
+      "first_nonzero_obs_after_step": 31,
+      "first_nonzero_action_in_step": 32,
+      "first_actuation_time_s": 0.62
+    }
+  },
+  "action_semantics": {
+    "ok": true,
+    "detail": {
+      "1.0": {
+        "q_target-q": [
+          0.09999999403953552,
+          0.10000000894069672
+        ],
+        "max|torque-expected|": 4.76837158203125e-07,
+        "q_unchanged": true
+      },
+      "0.25": {
+        "q_target-q": [
+          0.02499999850988388,
+          0.025000005960464478
+        ],
+        "max|torque-expected|": 1.7881393432617188e-07,
+        "q_unchanged": true
+      }
+    }
+  },
+  "delay_buffer": {
+    "ok": true,
+    "detail": {
+      "target_offsets_after_5_pushes_by_delay_idx_0..4": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "delay_substeps": [
+        4,
+        3,
+        2,
+        1,
+        0
+      ]
+    }
+  },
+  "observation_layout": {
+    "ok": true,
+    "detail": {
+      "shape": [
+        4,
+        258
+      ],
+      "frame": 43,
+      "history": 6,
+      "order": "ang_vel*0.25(3) | proj_gravity(3) | dof_pos(12) | dof_vel*0.05(12) | actions(12) | action_rescale+U(+-0.025)(1)",
+      "max|frame-ref|(no noise)": 0.0,
+      "action_rescale_obs": 0.9813094139099121,
+      "history_shift_ok": true,
+      "_unused": null
+    }
+  },
+  "observation_noise_vector": {
+    "ok": true,
+    "detail": {
+      "ang_vel": 0.05000000074505806,
+      "gravity": 0.05000000074505806,
+      "dof_pos": 0.009999999776482582,
+      "dof_vel": 0.07500000298023224,
+      "actions+rescale": 0.0
+    }
+  },
+  "pull_force": {
+    "ok": true,
+    "detail": {
+      "lying_after_unactuated_force(N)": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "xfrc_z per substep [env0 upright F=15, env1 upright F=0, env2 lying]": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          15.0,
+          0.0,
+          0.0
+        ],
+        [
+          15.0,
+          0.0,
+          0.0
+        ],
+        [
+          15.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "com_az env0-env1 (m/s^2)": 2.1665992736816406,
+      "expected 15/M": 2.167248771860809,
+      "robot_mass": 6.921217441558838,
+      "body": "base_link",
+      "frame": "world +Z at body COM (xfrc_applied)",
+      "_": 6.921217918395996
+    }
+  },
+  "rewards": {
+    "ok": true,
+    "detail": {
+      "groups": [
+        "task",
+        "regu",
+        "style",
+        "target"
+      ],
+      "lying_supine_groups": [
+        0.0036064486484974623,
+        -0.2981209456920624,
+        -0.004999999888241291,
+        0.0
+      ],
+      "standing_groups": [
+        1.0,
+        -2.1744244804722257e-05,
+        0.4743960499763489,
+        0.7950985431671143
+      ],
+      "standing_head_minus_feet": 0.38183894753456116,
+      "standing_base_z": 0.34918034076690674,
+      "stand_height_threshold": 0.3173333333333333,
+      "lying_terms": {
+        "task_head_height": 0.06509011347531762,
+        "task_orientation": 0.055407012292574616,
+        "regu_action_rate": -0.0,
+        "regu_dof_acc": -2.6557465389487334e-05,
+        "regu_dof_pos_limits": -0.2980891466140747,
+        "regu_dof_vel": -5.211627467360813e-06,
+        "regu_dof_vel_limits": -0.0,
+        "regu_joint_power": -2.414120281457599e-08,
+        "regu_joint_tracking_error": -3.1626021246289326e-11,
+        "regu_smoothness": -0.0,
+        "regu_torques": -4.798066388644884e-10,
+        "style_feet_distance": -0.0,
+        "style_ground_parallel": 0.0,
+        "style_hip_roll_deviation": -0.0,
+        "style_hip_yaw_deviation": -0.0,
+        "style_knee_deviation": -0.004999999888241291,
+        "style_left_foot_displacement": 0.0,
+        "style_right_foot_displacement": 0.0,
+        "style_style_ang_vel_xy": 0.0,
+        "target_ang_vel_xy": 0.0,
+        "target_feet_height_var": 0.0,
+        "target_lin_vel_xy": 0.0,
+        "target_target_base_height": 0.0,
+        "target_target_orientation": 0.0
+      },
+      "standing_terms": {
+        "task_head_height": 1.0,
+        "task_orientation": 1.0,
+        "regu_action_rate": -0.0,
+        "regu_dof_acc": -9.110140126722399e-06,
+        "regu_dof_pos_limits": -0.0,
+        "regu_dof_vel": -1.2634057384275366e-05,
+        "regu_dof_vel_limits": -0.0,
+        "regu_joint_power": -2.323115759819954e-15,
+        "regu_joint_tracking_error": -4.654232207967901e-11,
+        "regu_smoothness": -0.0,
+        "regu_torques": -7.465200583107224e-24,
+        "style_feet_distance": -0.0,
+        "style_ground_parallel": 0.4000000059604645,
+        "style_hip_roll_deviation": -0.0,
+        "style_hip_yaw_deviation": -0.0,
+        "style_knee_deviation": -0.0,
+        "style_left_foot_displacement": 0.02744058147072792,
+        "style_right_foot_displacement": 0.02744058147072792,
+        "style_style_ang_vel_xy": 0.019514884799718857,
+        "target_ang_vel_xy": 0.19514885544776917,
+        "target_feet_height_var": 0.03351600095629692,
+        "target_lin_vel_xy": 0.1999812126159668,
+        "target_target_base_height": 0.16645261645317078,
+        "target_target_orientation": 0.1999998241662979
+      }
+    }
+  },
+  "multi_critic_ppo": {
+    "ok": true,
+    "detail": {
+      "rewards": [
+        50,
+        64,
+        4
+      ],
+      "values": [
+        50,
+        64,
+        4
+      ],
+      "advantages": [
+        50,
+        64,
+        4
+      ],
+      "combined_advantage": [
+        50,
+        64
+      ],
+      "adv_mean_per_critic": [
+        7.1525572131747595e-09,
+        -1.907348590179936e-08,
+        -6.437301180994837e-08,
+        1.0728835597717534e-08
+      ],
+      "adv_std_per_critic": [
+        1.0,
+        1.0,
+        1.0,
+        0.9999999403953552
+      ],
+      "storage_step_filled": 20,
+      "init_std": [
+        0.800000011920929,
+        0.800000011920929,
+        0.800000011920929
+      ],
+      "num_critics": 4,
+      "smoothness_coefs": {
+        "policy": 0.11111111111111112
+      }
+    }
+  },
+  "ppo_update_runs": {
+    "ok": true,
+    "detail": {
+      "kl": Infinity,
+      "entropy": 14.347458696365356,
+      "policy_smooth_loss": 0.007189111062325537,
+      "value_smooth_loss": 0.015291507286019624,
+      "action_smoothness": 0.09543153047561645,
+      "grad_norm": 1.1988316148519516
+    }
+  },
+  "reset_pose_supine": {
+    "ok": true,
+    "detail": {
+      "init_quat_wxyz": [
+        0.7071067690849304,
+        0.0,
+        -0.7071067690849304,
+        0.0
+      ],
+      "projected_gravity_at_reset": [
+        -0.9999999403953552,
+        0.0,
+        -5.960464477539063e-08
+      ],
+      "interpretation": "gravity along -x_body (out of the back): supine, face up",
+      "projected_gravity_after_0.6s_fullDR": [
+        [
+          -0.7450000047683716,
+          0.04399999976158142,
+          -0.6650000214576721
+        ],
+        [
+          -0.9760000109672546,
+          0.2150000035762787,
+          -0.02199999988079071
+        ],
+        [
+          -0.7120000123977661,
+          -0.7020000219345093,
+          0.014000000432133675
+        ],
+        [
+          -0.4909999966621399,
+          0.014000000432133675,
+          -0.8709999918937683
+        ],
+        [
+          -0.9229999780654907,
+          0.04800000041723251,
+          -0.38100001215934753
+        ],
+        [
+          -0.6690000295639038,
+          -0.628000020980835,
+          -0.3970000147819519
+        ]
+      ],
+      "settled_distribution_1024_envs (see settle study)": {
+        "no_DR": {
+          "supine": 1.0
+        },
+        "full_DR": {
+          "supine": 0.363,
+          "upright_gate": 0.173,
+          "side": 0.104,
+          "prone": 0.005
+        },
+        "main_cause": "actuation_offset (+-1 N m constant torque while unactuated)"
+      }
+    }
+  }
+}
