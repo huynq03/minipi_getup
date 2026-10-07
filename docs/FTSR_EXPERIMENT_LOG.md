@@ -407,3 +407,11 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
 - v3: weights-only init from Gentle model_3500 (`--agent.init-checkpoint`, so the
   step counter and the assist schedule restart), assist off at it 1000 of this run
   (`DEPLOY_ASSIST_END_ITERATION`), 2000 it. Start: F ≈ 16 N, stage r_u.
+- v3 result: **collapsed** at it ~420. Population above h1 rose to ~0.66 by it 240
+  (assist ~3 N) then fell to 0.00 by 480 and stayed there (return 43–53 from lying
+  low; std 1.47 → 2.16). Cause: the stage manager isn't checkpointed, so every
+  fine-tune restarts in r_u; with the new motor model only ~50 % stood, below the 2/3
+  needed to leave r_u, whose 0.19 m height target pulled the policy off standing.
+  v2 sat in r_u too. Stopped at 639.
+- v4: as v3 plus the stage fixed at r_w (`DEPLOY_FIXED_STAGE = 2`). Start (it 127):
+  return 93, S1 0.95, S2 0.49, F 17.6 N.
