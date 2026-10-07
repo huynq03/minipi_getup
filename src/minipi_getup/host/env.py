@@ -193,6 +193,8 @@ class LeggedRobot_Pi:
     clip_actions = self.cfg.normalization.clip_actions
     self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
 
+    self.peak_torque_step = torch.zeros_like(self.torques)  # PORT: monitoring
+    self.step_energy = torch.zeros(self.num_envs, device=self.device)
     for _ in range(self.cfg.control.decimation):
       self.actions *= self.real_episode_length_buf.unsqueeze(1) > self.unactuated_time
       self.torques = self._compute_torques(self.actions).view(self.torques.shape)
@@ -1022,6 +1024,10 @@ class LeggedRobot_Pi:
     self.base_vel_out = torch.zeros(N, dtype=torch.bool, device=dev)
 
   def _substep_monitor(self):
+    self.peak_torque_step = torch.maximum(self.peak_torque_step, self.torques.abs())
+    self.step_energy += (self.dof_vel.abs() * self.torques.abs()).sum(
+      -1
+    ) * self.cfg.sim.dt
     self.peak_torque = torch.maximum(self.peak_torque, self.torques.abs())
     self.peak_joint_vel = torch.maximum(self.peak_joint_vel, self.dof_vel.abs())
     self.ep_power += (self.dof_vel.abs() * self.torques.abs()).sum(-1) * self.cfg.sim.dt
