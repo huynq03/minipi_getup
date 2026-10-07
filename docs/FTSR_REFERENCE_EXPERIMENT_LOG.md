@@ -271,3 +271,12 @@ leave only 7 /m of pull at the current height, hence the smaller step.
   the policy std has risen 0.45 (it 300) -> 0.67 (it 763) -> 0.92 (it 1183) under
   the release entropy coefficient 0.01. The 2/3 rule is evaluated on that noisy
   population, so exploration noise now gates the r_u -> r_s switch.
+
+## 2026-10-07: recovery v2 reaches r_s at iteration ~1251
+
+- S1 0.50 (it 1000) -> 0.65 (1247, assist 8 N, std 0.94) -> stage r_s from it 1251
+  (2/3 rule). After the switch h_cmd = 0.276, so Eq. 4 acts again below it: F 8 ->
+  31 N, S1 0.87, S2 0.02-0.11. Reward 25 -> -29 within 30 iterations: the r_s
+  weights (pos_bias -0.14 vs -0.06: -1.3 -> -2.7 /s; dof_acc -2.5e-6) and the new
+  0.276 target. Student MSE 0.010 -> 0.053 (new state distribution). qd > 3 4.8 ->
+  7.9 %, > 4 0.4 -> 1.5 %, slew 0.45 -> 0.63. No NaN.
