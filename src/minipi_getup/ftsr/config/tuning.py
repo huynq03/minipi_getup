@@ -55,3 +55,14 @@ GETUP_SOFT_V2 = {
   "joint_vel_excess": (-1.5, -1.5, -1.5),
   "height_schedule": (-100.0, -100.0, -100.0),
 }
+
+# Get-up-first round 3: hard limits instead of reward shaping. Rounds 1-2 showed that
+# speed penalties on a policy that already jumps up only stretch its slow phases, and
+# collapse it once they bind. Here the joint target may move at most
+# GENTLE_TARGET_STEP rad per 20 ms (5 rad/s), so a jump can't be commanded at all,
+# and the torque envelope is raised to GENTLE_TORQUE_LIMIT (user, 2026-10-07: 12-13
+# Nm) so that a slow get-up has the strength it needs. Trained from the walking
+# pretrain with the assist, like the faithful run, since the old policy relies on
+# fast targets. Rewards: faithful stage table, zero commands.
+GENTLE_TORQUE_LIMIT = 12.5
+GENTLE_TARGET_STEP = 0.1

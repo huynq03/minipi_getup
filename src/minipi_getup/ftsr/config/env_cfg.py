@@ -454,14 +454,23 @@ def ftsr_env_cfg(
   play: bool = False,
   stage_weight_overrides: dict[str, tuple[float, float, float]] | None = None,
   stand_only: bool = False,
+  torque_limit: float = OPERATIONAL_TORQUE_LIMIT,
+  max_target_step: float = 0.0,
 ) -> ManagerBasedRlEnvCfg:
   """Full FTSR task. ``stage_weight_overrides`` builds tuning variants.
 
   ``stand_only`` commands zero velocity in every env: after getting up the robot
-  only has to stand (get-up-first variants).
+  only has to stand (get-up-first variants). ``torque_limit`` sets the actuator
+  envelope (Nm) and ``max_target_step`` the joint target rate limit (rad per policy
+  step, 0 = off).
   """
   weights = _stage_weights(stage_weight_overrides)
   cfg = _base_cfg(play, weights)
+  if torque_limit != OPERATIONAL_TORQUE_LIMIT:
+    cfg.scene.entities["robot"] = get_ftsr_robot_cfg(torque_limit)
+    cfg.actions["joint_pos"].operational_torque_limit = torque_limit
+    cfg.rewards["torque_limit"].params["limit"] = 0.8 * torque_limit
+  cfg.actions["joint_pos"].max_target_step = max_target_step
   if stand_only:
     twist = cfg.commands["twist"]
     twist.rel_standing_envs = 1.0

@@ -104,6 +104,11 @@ class FtsrJointPositionActionCfg(RelativeJointPositionActionCfg):
   operational_torque_limit: float = 9.0
   """Effort envelope used for the saturation statistic (|tau| >= 0.9 x limit)."""
 
+  max_target_step: float = 0.0
+  """If > 0: the joint target moves at most this far (rad) per policy step, from the
+  previous target (from the measured pose after a reset). A hard rate limit that the
+  deployment wrapper must apply as well. 0 disables it."""
+
   def build(self, env: ManagerBasedRlEnv) -> FtsrJointPositionAction:
     return FtsrJointPositionAction(self, env)
 
@@ -114,6 +119,7 @@ class FtsrJointPositionAction(RelativeJointPositionAction):
   def __init__(self, cfg: FtsrJointPositionActionCfg, env: ManagerBasedRlEnv):
     super().__init__(cfg=cfg, env=env)
     self._target = torch.zeros_like(self._raw_actions)
+    self._fresh = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
     self.monitor = TorqueMonitor(
       len(self._target_ids), cfg.operational_torque_limit, env.device
     )
@@ -130,8 +136,17 @@ class FtsrJointPositionAction(RelativeJointPositionAction):
       in_window = self._env.episode_length_buf < self.cfg.settle_steps
       marked = self._env.extras.get("settle_mask", in_window)
       target = torch.where((in_window & marked).unsqueeze(-1), q, target)
+    if self.cfg.max_target_step > 0:
+      prev = torch.where(self._fresh.unsqueeze(-1), q, self._target)
+      step = self.cfg.max_target_step
+      target = torch.clamp(target, min=prev - step, max=prev + step)
+    self._fresh[:] = False
     limits = self._entity.data.soft_joint_pos_limits[:, self._target_ids]
     self._target = torch.clamp(target, min=limits[..., 0], max=limits[..., 1])
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    super().reset(env_ids)
+    self._fresh[slice(None) if env_ids is None else env_ids] = True
 
   def apply_actions(self) -> None:
     data = self._entity.data
