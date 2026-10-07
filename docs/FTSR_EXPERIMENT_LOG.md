@@ -329,3 +329,19 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
   at ~16 rad/s. Reward-side speed limits on a policy that already gets up dynamically
   only stretch the slow phases; when they bind, PPO falls off the get-up instead of
   finding a gentler motion.
+
+## ftsr_getup_gentle_v1 (get-up-first round 3)
+
+- Date: 2026-10-07 ~15:05. Code `6bcf2f2`. Task `Mjlab-FTSR-MiniPi-GetupGentle`.
+  Init (weights only) `ftsr_pretrain_rw_v4/model_300.pt`, as the faithful run;
+  4000 it, assist schedule as faithful (off at 3000). Window `getup:soft`.
+- User decision (2026-10-07): torque envelope for the get-up raised to 12-13 Nm;
+  12.5 Nm used (DR motor strength 0.85-1.05 → ≤ 13.1 Nm). Faithful task stays 9 Nm.
+- Changes vs faithful: joint target rate limit 0.1 rad per 20 ms step (5 rad/s, hard,
+  in the action term; must be applied by the deployment wrapper too); 12.5 Nm; zero
+  velocity commands. Rewards: faithful stage table (no speed penalties).
+- Hypothesis: a hard target rate limit rules out the jump the reward penalties couldn't
+  remove, without the reward-side instability; the extra torque keeps a slow get-up
+  feasible.
+- Check (64 envs, random actions): actuator forcerange ±12.5, max target step
+  0.1000 rad, max |τ| 12.6 Nm.
