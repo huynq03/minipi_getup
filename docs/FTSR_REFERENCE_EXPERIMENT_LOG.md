@@ -219,3 +219,7 @@ PPO, std, plant, slew, physics, assist schedule, teacher/student. Landscape with
 target 0.214: dR/dh = +46 /m below and +48 /m above h1, gain 0.18 -> 0.20 = +0.95,
 R(0.156) 1.41 (pull 25 /m, was 39), standing 0.37. Larger targets (0.285 = 1.5 h1)
 leave only 7 /m of pull at the current height, hence the smaller step.
+- v1 eval_1000 (no assist): still 0 % success, max height p90 <= 0.107 m, supine
+  seated at 0.056 m (cos 0.83), prone 0.082 m. Recovery v2 started from walk model_900
+  (`--agent.run-name ftsr_ref_recovery_v2`, log `logs/ftsr_ref_recovery_v2.log`,
+  tmux getup:ref), same command as v1.
