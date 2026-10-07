@@ -37,6 +37,7 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
 from minipi_getup.ftsr_ref.mdp.actions import COST_KEY
+from minipi_getup.ftsr_ref.mdp.stages import STAGE_KEY
 from minipi_getup.ftsr_ref.rl.modules import FtsrModel, StudentPolicy
 from minipi_getup.ftsr_ref.rl.storage import RolloutStorage
 
@@ -259,6 +260,7 @@ class FtsrRunner:
       self._log(
         it, logs, loss_info, adv_info, safety, rew_buf, len_buf, t_collect, t_learn
       )
+      self._report_transitions(it, logs)
       if self.log_dir is not None:
         if (it + 1) % cfg["save_interval"] == 0 or it == end - 1:
           self.save(os.path.join(self.log_dir, f"model_{it + 1}.pt"))
@@ -410,7 +412,7 @@ class FtsrRunner:
       f"[it {it}] rew {g('Train/mean_reward', float('nan')):.2f} "
       f"len {g('Train/mean_episode_length', float('nan')):.0f} "
       f"stage {g('Stage/stage', -1):.1f} S1 {g('Stage/frac_above_h1', 0):.2f} "
-      f"S2 {g('Stage/frac_above_h2', 0):.2f} F {g('Assist/force_mean', 0):.1f}N "
+      f"S2 {g('Stage/frac_above_h2', 0):.2f} h_cmd {g('Stage/h_cmd', 0):.3f} F {g('Assist/force_mean', 0):.1f}N "
       f"tc {g('Assist/time_coeff', 0):.3f} | tau mean {safety.get('tau_mean', 0):.2f} "
       f"max {safety.get('tau_max', 0):.1f} | qd mean {safety.get('qd_mean', 0):.2f} "
       f"max {safety.get('qd_max', 0):.1f} >3 {safety.get('qd_frac_above_3', 0):.3f} >4 "
@@ -442,8 +444,28 @@ class FtsrRunner:
       if abs(logged[k]) >= 5e-4
     ]
 
+  def _report_transitions(self, it: int, logs: dict) -> None:
+    stage = self.env.unwrapped.extras.get(STAGE_KEY)
+    if stage is None or not stage.transitions:
+      return
+    g = {k: v[0] for k, v in logs.items() if v}
+    for tr in stage.transitions:
+      print(
+        f"\n{'=' * 60}\n[FTSR STAGE TRANSITION] {tr['from']} -> {tr['to']}\n"
+        f"  iteration = {it} (env step {tr['step']})\n"
+        f"  S1 = {tr['s1']:.3f}  S2 = {tr['s2']:.3f}\n"
+        f"  tc = {g.get('Assist/time_coeff', 0.0):.4f}  "
+        f"assist_force (iteration mean) = {g.get('Assist/force_mean', 0.0):.1f} N\n"
+        f"{'=' * 60}",
+        flush=True,
+      )
+      if self.writer is not None:
+        self.writer.add_scalar("Stage/transition_to", tr["to"], it)
+    stage.transitions.clear()
+
   def save(self, path: str, infos=None) -> None:
     unwrapped = self.env.unwrapped
+    stage = unwrapped.extras.get(STAGE_KEY)
     torch.save(
       {
         "model": self.model.state_dict(),
@@ -459,7 +481,10 @@ class FtsrRunner:
         },
         "infos": {
           **(infos or {}),
-          "env_state": {"common_step_counter": unwrapped.common_step_counter},
+          "env_state": {
+            "common_step_counter": unwrapped.common_step_counter,
+            **({"ftsr_stage": stage.state_dict()} if stage is not None else {}),
+          },
         },
       },
       path,
@@ -490,6 +515,11 @@ class FtsrRunner:
     infos = ckpt.get("infos") or {}
     if "env_state" in infos:
       self.env.unwrapped.common_step_counter = infos["env_state"]["common_step_counter"]
+      stage = self.env.unwrapped.extras.get(STAGE_KEY)
+      saved = infos["env_state"].get("ftsr_stage")
+      if stage is not None and saved is not None:
+        stage.load_state_dict(saved)
+        print(f"[FTSR-Ref] restored stage {stage.stage} from {path}")
     rng = ckpt.get("rng")
     if rng is not None:
       torch.set_rng_state(rng["torch"].cpu())

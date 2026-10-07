@@ -242,7 +242,12 @@ def recovery_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     func=mdp.stage_setup,
     mode="startup",
     params={
-      "stage": mdp.StageCfg(heights=STAGE_HEIGHTS, reward_heights=STAGE_REWARD_HEIGHTS)
+      "stage": mdp.StageCfg(
+        heights=STAGE_HEIGHTS,
+        reward_heights=STAGE_REWARD_HEIGHTS,
+        # Recovery v3: latched (monotonic) stages, see mdp/stages.py.
+        monotonic=True,
+      )
     },
   )
   cfg.events["reset_pose"] = EventTermCfg(

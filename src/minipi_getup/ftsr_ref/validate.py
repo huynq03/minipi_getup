@@ -905,6 +905,80 @@ def t24_resume(_):
   )
 
 
+def t26_monotonic_stage(_):
+  from minipi_getup.ftsr_ref.mdp.stages import next_stage
+
+  cfg = StageCfg(heights=STAGE_HEIGHTS, monotonic=True)
+  cases = {
+    "A stage 0, S1 0.60 -> 0": next_stage(0, 0.60, 0.0, cfg) == 0,
+    "B stage 0, S1 0.70 -> 1": next_stage(0, 0.70, 0.0, cfg) == 1,
+    "C stage 1, S1 0.20 S2 0.10 -> 1": next_stage(1, 0.20, 0.10, cfg) == 1,
+    "D stage 1, S2 0.70 -> 2": next_stage(1, 0.90, 0.70, cfg) == 2,
+    "E stage 2, S1 0 S2 0 -> 2": next_stage(2, 0.0, 0.0, cfg) == 2,
+    "one step at a time (0, S2 0.9 -> 1)": next_stage(0, 0.95, 0.90, cfg) == 1,
+    "forward threshold strict (0, 2/3 -> 0)": next_stage(0, 2.0 / 3.0, 0, cfg) == 0,
+  }
+  # Live env: the recovery task latches; a lying population in stage 1 / 2 stays there.
+  env = make_env(REC, 16)
+  st = env.extras["ftsr_stage"]
+  live = st.cfg.monotonic and st.cfg.heights == STAGE_HEIGHTS
+  env.step(torch.zeros(16, 12, device=DEV))
+  live &= st.stage == 0 and float(st.s1) < 2.0 / 3.0
+  for forced in (1, 2):
+    st.stage = forced
+    for _ in range(3):
+      env.step(torch.zeros(16, 12, device=DEV))
+    live &= st.stage == forced and abs(st.h_cmd - STAGE_HEIGHTS[forced]) < 1e-9
+  live &= st.transitions == []
+  env.close()
+  ok = all(cases.values()) and live
+  return ok, f"{cases}; live lying population keeps latched stage 1 and 2: {live}"
+
+
+def t27_stage_checkpoint(_):
+  from dataclasses import asdict
+
+  from mjlab.rl import RslRlVecEnvWrapper
+
+  from minipi_getup.ftsr_ref.config.rl_cfg import recovery_runner_cfg
+  from minipi_getup.ftsr_ref.rl.runner import FtsrRunner
+
+  cfg = asdict(recovery_runner_cfg())
+  cfg["eval_every"] = 0
+  tmp = tempfile.mkdtemp()
+  got = {}
+  for saved in (1, 2):
+    env = RslRlVecEnvWrapper(make_env(REC, 16))
+    r = FtsrRunner(env, cfg, tmp, DEV)
+    env.unwrapped.extras["ftsr_stage"].stage = saved
+    path = os.path.join(tmp, f"stage_{saved}.pt")
+    r.save(path)
+    env.close()
+    env2 = RslRlVecEnvWrapper(make_env(REC, 16))
+    r2 = FtsrRunner(env2, cfg, None, DEV)
+    st = env2.unwrapped.extras["ftsr_stage"]
+    before = st.stage
+    r2.load(path)
+    after_load = st.stage
+    # Lying population after resume: S1 = 0, still the saved stage.
+    for _ in range(3):
+      env2.step(torch.zeros(16, 12, device=DEV))
+    got[saved] = (before, after_load, st.stage, float(st.s1))
+    env2.close()
+  # Fresh start from a walking checkpoint (weights only) begins at stage 0.
+  env3 = RslRlVecEnvWrapper(make_env(REC, 16))
+  r3 = FtsrRunner(env3, cfg, None, DEV)
+  r3.load_weights(os.path.join(tmp, "stage_2.pt"))
+  env3.step(torch.zeros(16, 12, device=DEV))
+  fresh = env3.unwrapped.extras["ftsr_stage"].stage
+  env3.close()
+  ok = all(v[1] == k and v[2] == k for k, v in got.items()) and fresh == 0
+  return ok, (
+    "(fresh env stage, after load, after 3 lying steps, S1): "
+    f"F saved 1 -> {got[1]}; G saved 2 -> {got[2]}; weights-only init -> stage {fresh}"
+  )
+
+
 def t25_onnx(_):
   from minipi_getup.ftsr_ref.export import export_onnx, onnx_parity
   from minipi_getup.ftsr_ref.rl.modules import FtsrModel
@@ -956,6 +1030,8 @@ TESTS = [
   (23, "random rollout without NaN", t23_random_rollout),
   (24, "checkpoint resume", t24_resume),
   (25, "PyTorch -> ONNX equivalence", t25_onnx),
+  (26, "monotonic stage latch", t26_monotonic_stage),
+  (27, "stage persists in checkpoints", t27_stage_checkpoint),
 ]
 
 
