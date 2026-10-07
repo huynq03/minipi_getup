@@ -226,7 +226,10 @@ def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
   )
 
 
-def recovery_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def recovery_env_cfg(
+  play: bool = False, monotonic: bool = True
+) -> ManagerBasedRlEnvCfg:
+  """``monotonic=False`` = release stateless stages (recovery v1/v2 semantics)."""
   cfg = _base_cfg(play)
   act = cfg.actions["joint_pos"]
   act.passive_steps = PASSIVE_STEPS
@@ -246,7 +249,7 @@ def recovery_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         heights=STAGE_HEIGHTS,
         reward_heights=STAGE_REWARD_HEIGHTS,
         # Recovery v3: latched (monotonic) stages, see mdp/stages.py.
-        monotonic=True,
+        monotonic=monotonic,
       )
     },
   )

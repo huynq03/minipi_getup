@@ -1,4 +1,4 @@
-"""Register the two FTSR reference tasks."""
+"""Register the FTSR reference tasks."""
 
 from mjlab.tasks.registry import register_mjlab_task
 
@@ -18,6 +18,16 @@ register_mjlab_task(
   task_id="Mjlab-FTSR-Ref-MiniPi-Recovery",
   env_cfg=recovery_env_cfg(),
   play_env_cfg=recovery_env_cfg(play=True),
+  rl_cfg=recovery_runner_cfg(),
+  runner_cls=FtsrRunner,
+)
+
+# Recovery v2 semantics (stateless stages that may regress), to resume / evaluate
+# the v2 run under the code it was trained with. Otherwise identical.
+register_mjlab_task(
+  task_id="Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless",
+  env_cfg=recovery_env_cfg(monotonic=False),
+  play_env_cfg=recovery_env_cfg(play=True, monotonic=False),
   rl_cfg=recovery_runner_cfg(),
   runner_cls=FtsrRunner,
 )
