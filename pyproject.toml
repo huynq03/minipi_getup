@@ -37,6 +37,8 @@ explicit = true
 [tool.ruff]
 indent-width = 2
 src = ["src/minipi_getup"]
+# Verbatim copies of HoST's rsl_rl fork (4-space indent kept for diffing).
+extend-exclude = ["src/minipi_getup/host_rl"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B"]
@@ -45,6 +47,11 @@ select = ["E4", "E7", "E9", "F", "I", "B"]
 dev = [
     "ruff>=0.14.14",
 ]
+
+[project.scripts]
+host-train = "minipi_getup.host.train:main"
+host-play = "minipi_getup.host.play:main"
+host-eval = "minipi_getup.host.evaluate:main"
 
 [project.entry-points."mjlab.tasks"]
 minipi_getup = "minipi_getup"
