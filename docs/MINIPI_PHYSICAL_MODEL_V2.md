@@ -48,36 +48,41 @@ the vendor RL controller and of the existing mini_pi_fsm RL packages
   false`, `tau_max: []`); the robot param file sets `tor_limit_enable: false` for all 12
   motors. What the firmware limits internally is unknown (the SDK only exposes a
   `motor_torque_limit_flag`).
-- Simulation equivalent: MuJoCo position actuator (PD at 500 Hz) with the
-  target held for 10 physics steps. Equivalent up to the 1 kHz vs 500 Hz PD rate.
+- Simulation: MuJoCo position actuator, PD evaluated every 2 ms physics step (500 Hz),
+  target held for 10 physics steps. The hardware firmware PD runs at its own (unknown,
+  ≥ 1 kHz command refresh) rate. 500 Hz simulated PD vs 1 kHz-refreshed firmware PD is
+  an **approximation that needs a sensitivity check** (e.g. compare 2 ms vs 1 ms
+  physics on the same policy), not an exact equivalence.
 
-## 4. Motor data: CONTRADICTORY (blocker)
+### Mini-Pi invariant: joint target clipping
 
-| Evidence | Says | Source |
-|---|---|---|
-| Robot param file actually loaded by `mini_pi_fsm.launch` | all 12 motors `type: "5047_36_2"` | `install/share/sim2real/robot_param/12dof_STM32H730_pi_lubancat_params.yaml` |
-| SDK motor table | `5047_36_2` = "new 5047_36 (all current motors are the new model)", torque coefficient 0.8030; driver documented as **HTDW-5047-36-NE** | `livelybot_serial/include/hardware/motor.h:75,86`, `sim2real_sdk/include/motor/motor_base.h:129` |
-| Public product page | joint modules **HTDW-5036-02-DNE / -CNE**, robot max joint torque 16 Nm; no speed or rated-torque numbers on the page | fetched 2026-10-07 |
-| User-supplied datasheet summary (ChatGPT, source not shown) | HTDW-5036-02: rated 6 Nm @ 50 rpm (5.24 rad/s), **no-load 75 rpm = 7.85 rad/s**, locked-rotor 21 Nm, 36:1 | conversation, unverified |
-| Vendor URDF | `effort="21"`, **`velocity="21"` rad/s** on every joint | `clpai_12dof_0905.urdf` |
-| Vendor `pai_control` | `tau_limits` 16 Nm (6 Nm ankle roll) | `pai_model.yaml` |
-| Vendor RL controller | `torque_limits` 35 Nm | `devel_config/config.yaml` |
-| Old minipi_getup | 16 Nm cap (`MINIPI_EFFORT_LIMIT`) | repo |
+`q_target` must be clipped to the physical per-joint limits (the XML/URDF ranges in §1,
+or documented safety margins inside them) **identically** in training and in the
+deploy package (`deploy.yaml` `actions.JointPositionAction.clip`, per joint, policy
+order). The mini_pi_fsm safety bounds (`q_lower/q_upper = ±3.14`) only catch gross
+mapping errors and are not physical joint protection.
 
-Conflicts:
+## 4. Motor data: unknown envelope (blocker)
 
-1. **Motor model**: HTDW-5047-36 (SDK, loaded config) vs HTDW-5036-02 (product page,
-   the source of the user's numbers).
-2. **No-load speed**: 7.85 rad/s (user summary) vs 21 rad/s (vendor URDF). Locked-rotor
-   21 Nm agrees with the URDF effort, but the speed differs by 2.7×.
-3. **Torque cap**: 16 Nm (product page, `pai_control`), 6 Nm on ankle roll
-   (`pai_control`), 35 Nm (vendor RL), none (mini_pi_fsm, firmware flags off).
+Evidence, classified by what it actually measures:
 
-Why it blocks: the instructions require the final torque-speed model from walking
-pretraining iteration 0. The archived `GetupDeploy` runs showed the result hinges on it:
-with a 7.85 rad/s curve the prone recovery was never found (0 %), while the 21 rad/s
-URDF value would make the curve nearly inactive at the speeds observed (≤ 17 rad/s).
-Picking one would be inventing the plant.
+| Layer | Evidence | Value | What it is (and is not) |
+|---|---|---|---|
+| Installed hardware | loaded robot param file `12dof_STM32H730_pi_lubancat_params.yaml`; SDK motor table (`livelybot_serial/hardware/motor.h:75,86`), `sim2real_sdk/motor/motor_base.h:129` | all 12 motors `5047_36_2` = new HTDW-**5047-36**-NE, torque coefficient 0.8030 | identifies the motor; gives no torque-speed data |
+| Motor physical capability | user-supplied summary (source not shown) for HTDW-**5036**-02 | rated 6 Nm @ 5.24 rad/s, no-load 7.85 rad/s, locked-rotor 21 Nm, 36:1 | **unverified**, and for a different model name than the installed one |
+| Motor physical capability | public product page | module names HTDW-5036-02-DNE/-CNE, robot max joint torque 16 Nm | no speed, no rated/stall data; model name disagrees with the SDK |
+| Model description | vendor URDF `clpai_12dof_0905.urdf` | `effort="21"`, `velocity="21"` | URDF joint limits for simulators; **not** verified motor stall torque or no-load speed |
+| Firmware / current limit | robot param file | `tor_limit_enable: false`, `tor_upper 5 / tor_lower −3` (unused) | the firmware's own current/torque limit is undocumented; the SDK only exposes `motor_torque_limit_flag` |
+| Controller software limit | vendor `pai_control` `pai_model.yaml` | `tau_limits` 16 Nm, **6 Nm ankle roll** (CPU PD clamp of that controller) | a vendor controller choice |
+| Controller software limit | vendor RL controller `devel_config/config.yaml` | `torque_limits` 35 Nm | a vendor controller choice |
+| Controller software limit | mini_pi_fsm | none (`enable_torque_limit: false`) | the deploy target applies no clamp |
+| Simulation / reward limit | archived minipi_getup | 16 Nm cap, 9 / 12.5 Nm envelopes, `torque_limit` penalties | simulation choices, not evidence |
+
+**Blocker (unchanged):** the torque-speed envelope of the installed HTDW-5047-36-NE
+(peak/stall torque, no-load speed at the joint, rated point) and the instantaneous
+safe torque limit to enforce in the plant are unknown. The plant must be final from
+pretraining iteration 0, and the archived runs showed the outcome depends on these
+numbers (prone recovery 0 % under a 7.85 rad/s curve). No value is chosen.
 
 Supporting evidence of feasibility on hardware: the vendor RL package ships scripted
 get-up waypoint sequences for all four fallen poses
@@ -101,6 +106,9 @@ prebuilt binary and is not recoverable from source.
 - Rated torque (if verified) is monitored (time above rated), not enforced.
 
 ## 6. What is needed from the user
+
+Separately for: motor physical capability, firmware/current limit, the controller
+software limit to use on mini_pi_fsm, and (derived from those) the simulation limit.
 
 One of:
 

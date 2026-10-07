@@ -9,9 +9,9 @@ checked in the current code; nothing is taken from older notes.
 | 1 | Joint order | Robot order: left leg then right leg (`l_hip_pitch, l_hip_roll, l_thigh, l_calf, l_ankle_pitch, l_ankle_roll, r_…`). Policy order is whatever `deploy.yaml joint_names` lists, resolved by name | `robots/mini_pi/config/mapping.yaml`, `doc/policy_format.md` |
 | 2 | Signs | `direction = [1,1,−1,−1,1,1, −1,1,−1,1,−1,1]` motor→robot; robot frame = URDF frame | `mapping.yaml`, `JointMapper.h` |
 | 3 | Offsets | `joint_offset = [−0.25,0,0,0.65,−0.40,0]×2`; `robot_q = dir·motor_q[map] − offset` | `mapping.yaml` |
-| 4 | Joint limits | Safety `q_lower/q_upper` ±3.14 (deliberately loose, "REQUIRES HARDWARE TEST"); physical ranges = URDF/XML | `safety.yaml` |
+| 4 | Joint limits | Safety `q_lower/q_upper` ±3.14 (deliberately loose, "REQUIRES HARDWARE TEST"): **not physical joint protection**. Physical ranges = URDF/XML. Invariant for the port: `q_target` clipped to the physical per-joint ranges (or documented margins) identically in training and in `deploy.yaml` `clip` | `safety.yaml`, `joint_actions.h` |
 | 5 | Policy rate | `step_dt` from `deploy.yaml` (0.02 in every package); fixed-grid policy thread | `RLPolicyRunner.cpp:369` |
-| 6 | Low-level rate | `control_hz: 1000`; motor feedback query every 2 ms | `robot.yaml` |
+| 6 | Low-level rate | `control_hz: 1000` command refresh; motor feedback query every 2 ms; firmware PD rate itself undocumented. Simulation uses 500 Hz PD: an approximation that needs sensitivity validation | `robot.yaml` |
 | 7 | PD on hardware | per package `stiffness`/`damping`; motor firmware PD | `RLPolicyRunner.cpp:280–285`, `HighTorqueHardware.cpp:235` |
 | 8 | Target hold | latest policy output re-sent every control tick (ZOH) | `State_RLBase::run` |
 | 9 | Action scaling | per-joint `scale` (scalar or list) | `joint_actions.h` |
@@ -55,8 +55,9 @@ Extra findings:
 1. **Interface fits without C++**: actor `o_t` and the student history can be two
    ONNX inputs (two groups: history group with `use_gym_history: true`,
    `history_length: 5`, and a current-frame group), per-joint scale, `raw_clip` to match
-   training. The action is a plain `default + scale·clip(a)`; no slew limiter, so
-   training must not use one.
+   training. The action is a plain `clip_target(default + scale·raw_clip(a))`; no slew
+   limiter, so training must not use one. The per-joint target clip must equal the
+   physical joint ranges (or documented margins) used in training.
 2. **A lying robot cannot run any policy today**: the global orientation check latches
    a fault while lying (tilt ≈ π/2 > 1.0), and the single RL runner is bound to
    `Velocity`, entered only through FixStand. Running a get-up policy needs a C++

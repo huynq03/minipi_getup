@@ -15,7 +15,9 @@ Paths are relative to `/home/huy/getup_gym/getup_gym/` unless stated. Every stat
 was traced from assignments and call order, not from comments or names.
 
 Deviation classes used: `SIMULATOR_PORT`, `ROBOT_ADAPTATION`, `HARDWARE_CONSTRAINT`,
-`REFERENCE_BUG_FIX`, `PAPER_COMPLETION`.
+`REFERENCE_BUG_FIX`, `PAPER_COMPLETION`. Points the paper leaves open and that are not
+yet derived are marked `PAPER_AMBIGUITY`; values to be calibrated are marked
+`UNRESOLVED`.
 
 ## 1. Executable path actually used by `scripts/train.py`
 
@@ -98,7 +100,24 @@ Then `compute_returns(critic_obs, force_buf)`, `alg.update()`,
 | Noise (uniform ±) | ang vel 0.05·0.25, gravity 0.05, dof pos 0.04, dof vel 0.06·0.05; none on commands/actions | |
 | Student `o^s` | the 5 most recent entries of `observations_stack`, oldest first, frame-major | 5×34 |
 | Teacher `x^t` | wheel contact forces (3+3), `base_height·0.4`, full root state (13: world pos incl. env origin, quat, lin vel, ang vel) | 20 |
-| Critic `s_t` | `o_t` with the true lin vel (·2), 187 height samples `clip(h_root − 0.5 − h_terrain, ±1)·5`, base height | 34+188 (paper: s ∈ R^188 ✓), plus `z_t` from the teacher encoder for all rows |
+| Privileged obs (`privileged_obs_buf`) | `o_t` (34, with the zeroed lin-vel slot replaced by the true `base_lin_vel·2`) + 187 height samples `clip(h_root − 0.5 − h_terrain, ±1)·5` (17 × 11 grid) + base height (1) | 34 + 187 + 1 = **222** |
+| Final critic input | `cat(E_t(x^t), privileged_obs)` for **all 4000 rows**, teacher latent even for student rows (`on_policy_runner.py:142,182`, `num_critic_obs += layer_size`) | 12 + 222 = **234** |
+| Final actor input | `cat(z, o_t)`: `E_t(x^t)` for rows `[0:3000]`, `E_s(o^s)` for rows `[3000:4000]` | 12 + 34 = 46 |
+
+Paper vs release for the critic (conflicts, recorded, not reconciled):
+
+- **Critic state.** Paper Table I: Critic input `z_t, s_t` with `s_t ∈ R^188` "containing
+  height map and robot base height" (187 + 1). Release: `s_t` is preceded by the full
+  34-dim `o_t` (with true linear velocity), i.e. `[z_t, o_t*, s_t]` = 234, not
+  `[z_t, s_t]` = 200. The paper's Fig. 2 caption says `z_t` is "concatenated with `o_t`
+  and `s_t` for shared Actor-Critic networks", which is closer to the release but
+  contradicts Table I.
+- **Critic latent routing.** Paper Fig. 2: an "or" module selects `z^t_t` for
+  teacher-group agents and `z^s_t` for student-group agents "to form `z_t` concatenated
+  with `o_t` and `s_t`", which reads as the student latent reaching the critic for
+  student rows. Release: the critic always gets the teacher latent (`st`) for all rows.
+- Both are `PAPER_AMBIGUITY` for the port; the release behavior is the default port
+  (release first), the conflict is to be revisited only if training evidence requires.
 
 ## 4. External assistance in the release (`legged_robot.py::_base_force_pull_up`)
 
@@ -209,11 +228,11 @@ port implements Eq. 5–8 (`PAPER_COMPLETION`, §9).
 | Assist force | Eq. 4: `(1 − e^{−μ(h_cmd,i − h)})·sat(1 − t/t_tag)·F_max·n`, stage `h_cmd` | linear `(0.75 − h)/0.75`, fixed 0.75 m | yes | **Eq. 4** | `PAPER_COMPLETION`: F and T must be the CPO constraint costs (§6), and the release torque only works for its single reset pose |
 | Assist torque | `T_max·log(R_tag R⁻¹)` (so(3)) | world-x scalar from `q_y` | yes | **so(3), R_tag = upright with the current yaw** (no yaw target) | `PAPER_COMPLETION` (four poses) |
 | F_max | not given | 400 N = 1.474 mg | – | **1.474·m·g** of Mini-Pi (dimensionless reference scaling) = 100.4 N; ablation 1.0 mg | `ROBOT_ADAPTATION` |
-| T_max | not given | `−10` N·m scale | – | dimensionless `T/(m g L)` from the release scale, L = stance height (§10) | `ROBOT_ADAPTATION` |
-| μ | not given | – (linear) | – | chosen so the Eq. 4 height factor at the lying height equals the release's linear factor (0.87) (§10) | `PAPER_COMPLETION` |
+| T_max | not given | world-x scalar `−10·t·|q_y+1|·(0.75−h)/0.75` | yes: the release coefficient is not the paper's `T_max` (different axis construction and argument, `|q_y+1|` ∈ [0, 2] is not a rotation angle) | **UNRESOLVED**, calibration parameter. A dimensionless reference `10/(m g L)` = 0.049 is only an order-of-magnitude anchor | – |
+| μ | not given | – (the release is linear) | yes | **UNRESOLVED**, calibration parameter. Matching the release's linear factor at the lying height is one candidate, not a derivation | – |
 | t_tag | step at which assist ends | iteration 3000 | no | 3000 iterations × 24 steps | release |
 | Constraint optimization | Eq. 5–8, β = 0.001 | no-op | yes | Eq. 5–8 (§9) | `PAPER_COMPLETION` |
-| Stages | 3 (r_u, r_s, r_w); `|S_1| > 2/3N` (h > h1) → r_s, `|S_2| > 2/3N` (h > h2) → r_w; Alg. 1's `p` formula maps p=1 to r^w, contradicting the text | 3 used groups (g2, g3, g4); g3 at 2/3 above 0.40 m; g4 also needs 2/3 with `force_scale < 100 N` (tied to the release force form); stateless every step | partly | **Release decision frequency and statelessness, paper thresholds S1/S2** with h1, h2 from normalized release heights (§10). Text semantics, not Alg. 1 `p` | release g4 criterion depends on the release force form we replace; the paper's S2 is the same idea (≈ 0.75 stance early on) |
+| Stages | 3 (r_u, r_s, r_w); `|S_1| > 2/3N` (h > h1) → r_s, `|S_2| > 2/3N` (h > h2) → r_w; Alg. 1's `p` formula maps p=1 to r^w, contradicting the text | 3 used groups (g2, g3, g4); g3 at 2/3 above 0.40 m; g4 also needs 2/3 with `force_scale < 100 N` (tied to the release force form); stateless every step | partly | **Release decision frequency and statelessness, paper threshold structure S1/S2**; h1, h2, h3 are **candidate** Mini-Pi parameters (§10), not fixed. Text semantics, not Alg. 1 `p` | release g4 criterion `force_scale < 100 N` depends on both height and `time_coeff`, so it is not a height threshold and cannot be mapped to a fixed h2 |
 | Height target | per stage `h_cmd,i` | population-mean ladder 0.3/0.45/0.6/0.75 | yes | **per-stage `h_cmd`** (Eq. 4 needs it) | `PAPER_COMPLETION` |
 | Rewards | Table II weights | groups g2/g3/g4 (§5) | yes (weights, orientation formula, kernels) | **release formulas and weights**, robot-specific replacements only | release first |
 | Base height kernel | `exp(−8.3Δh²)` | `exp(−|Δh|/0.12)` | yes | release with σ scaled by stance ratio (0.12·0.345/0.75 = 0.055 m) | `ROBOT_ADAPTATION` (geometry) |
@@ -224,35 +243,44 @@ port implements Eq. 5–8 (`PAPER_COMPLETION`, §9).
 | Resets | 4 poses + Euler U(±0.3), joints U(0.5, 1.5)·default | 1 pose, joints U(0.1, 1.5)·default | yes | 4 poses + Euler noise; joint noise additive (Mini-Pi default = 0, §10) | `PAPER_COMPLETION` / `ROBOT_ADAPTATION` |
 | DR | Table III | friction, mass, CoM, restitution, push after it 2000 | yes | none at first; Table III scaled to Mini-Pi afterwards, one family at a time | per user instructions |
 | Iterations | 8000 | 1500 | yes | 8000 | paper |
-| Timing | 200 Hz sim / 50 Hz policy / 500 Hz hardware | same | no | **500 Hz sim** / 50 Hz policy | `HARDWARE_CONSTRAINT` / `SIMULATOR_PORT` (Mini-Pi chatters at 5 ms; deploy runs 1 kHz) |
+| Timing | 200 Hz sim / 50 Hz policy / 500 Hz hardware | same | no | **500 Hz sim** / 50 Hz policy | `HARDWARE_CONSTRAINT` / `SIMULATOR_PORT` (Mini-Pi chatters at 5 ms). The Mini-Pi hardware runs the firmware PD with targets refreshed at 1 kHz; 500 Hz simulated PD is an **approximation requiring sensitivity validation** (e.g. 1 ms physics check), not exact equivalence |
 
-## 9. Force-guided objective to implement (derivation)
+## 9. Force-guided objective (Eq. 5–8): what is fixed, what is ambiguous
 
-Costs per env step, made dimensionless: `C1 = ‖F‖/F_max`, `C2 = ‖T‖/(T_max·π)`.
-Exactly zero when the assist is zero.
+Fixed by the paper:
 
-Eq. 8 with the penalty method of Eq. 5:
+- Two constraint costs `C1 = F`, `C2 = T` (Eq. 4 quantities) with `J_Ci(π) ≤ d_i`.
+- Penalty-function form (Eq. 5) optimized with PPO; mixed advantage (Eq. 8):
+  `Ā_t = A_t − Σ_i β_i ( J_{t,Ci}(π_k) + E[A_{t,Ci}]/(1 − γ) )`.
+- `A` and `A_Ci` "are computed using GAE"; "prior to gradient calculation using the
+  advantage functions, an additional standardization step is applied" (the advantage
+  functions, not `J`).
+- Baseline penalty factor **β = 0.001** (Table IV(b): 0.02 degrades).
+- `d_i = 0` at `t = t_tag`, so that `Ā = A` after the assist ends.
 
-```
-Ā_t = A_t − Σ_i β_i ( J_{t,Ci} + A_{t,Ci}/(1 − γ) ),   β_i = 0.001
-```
+`PAPER_AMBIGUITY` (to be derived before coding, with a hand-computed unit test):
 
-- `A_t`: GAE(γ, λ) on rewards with the critic `V` (as the release).
-- `A_{t,Ci}`: GAE(γ, λ) on `C_i`. GAE needs a value baseline for the cost; the paper
-  doesn't name one. Without a baseline `A_C` would be a truncated discounted cost sum,
-  which includes the state's cost-to-go and is not an advantage. A **separate cost
-  value head** `V_C` (2 outputs, same input as the critic) is therefore added and
-  trained on cost returns: `PAPER_COMPLETION`, isolated from the reward critic.
-- `J_{t,Ci}(π_k)`, "the constraint function value at time step t", is read as the cost
-  value estimate `V_Ci(s_t)` (expected discounted cost from `t` under `π_k`).
-- Standardization: "prior to gradient calculation using the advantage functions, an
-  additional standardization step is applied". Each of `A`, `A_Ci` and `J_Ci` is
-  standardized over the batch before Eq. 8 is formed. This makes β scale-free:
-  `β/(1 − γ) = 0.1` weights the cost advantage, `β = 0.001` the cost level.
-- `d_i = 0` at `t_tag`: for iterations ≥ 3000 the constraint term is identically zero
-  and `Ā = std(A)` (no residual shaping from a stale cost critic).
-- Unit test: a 4-step synthetic rollout with hand-computed reward GAE, cost GAE,
-  standardization and Ā (`validate.py`).
+1. **Estimator of `A_Ci`.** GAE needs a value baseline for each cost; the paper names
+   none. Candidates: (a) a separate cost value estimator; (b) GAE with a zero baseline
+   (truncated discounted cost sum); (c) another estimator. The paper does not require a
+   separate cost critic; if one is introduced it is an implementation completion and
+   must be justified, isolated from the reward critic and tested.
+2. **Meaning and estimator of `J_{t,Ci}(π_k)`.** The text calls it "the constraint
+   function value at time step t in the trajectory". It could be the immediate cost, a
+   per-step return estimate, or a value estimate. No choice is made yet; equating it
+   with a cost value estimate `V_Ci(s_t)` is not supported by evidence.
+3. **Standardization scope.** Which quantities are standardized (only `A`; `A` and
+   each `A_Ci`), and whether before or after the β-weighted combination. `J` is not
+   assumed standardized.
+4. **Cost units.** Using normalized costs `‖F‖/F_max` and `‖T‖/(T_max·π)` is an
+   implementation hypothesis, not a paper fact. β = 0.001 is preserved as the paper
+   baseline, but its effective strength depends on the cost units and on the
+   standardization scope: any unit change changes the meaning of β and must be stated.
+5. **Teacher vs student terms** (`J^j`, `A^j` per group in Eq. 8): whether costs and
+   advantages are computed per group or jointly.
+
+The release provides no evidence for any of these (§6: its force path is inactive and
+has a different, β-free form).
 
 ## 10. Mini-Pi numbers derived from the reference (pending the plant)
 
@@ -261,8 +289,9 @@ Eq. 8 with the penalty method of Eq. 5:
 | Mass | 27.669 kg | measured | 6.94 kg (68.1 N) |
 | Stance height L | 0.75 m | measured | 0.345 m |
 | F_max | 400 N = 1.474 mg | ×(m g) | 100.4 N |
-| T scale | 10 N·m → 10/(271.4·0.75) = 0.0491 | ×(m g L) | 1.15 N·m at the release's |q_y+1| = 1 |
-| Stage thresholds | g2 below 0.35 (0.467 L), g3 above 0.40 (0.533 L), g4 ≈ force < 0.25·F_max ⇒ h > 0.75·L early | ×L | h1 = 0.184 m, h2 ≈ 0.259 m |
+| T scale | release world-x coefficient 10 N·m (not `T_max`) → 10/(271.4·0.75) = 0.0491 | ×(m g L) | order-of-magnitude anchor 1.15 N·m only; `T_max` **UNRESOLVED** |
+| μ | release has none (linear) | – | **UNRESOLVED** |
+| Stage thresholds | g2 below 0.35 (0.467 L), g3 above 0.40 (0.533 L); g4 needs `force_scale < 100 N`, which depends on height **and** `time_coeff` (no fixed height) | ×L | g3 threshold ↔ 0.184 m; no h2 derivable from the release |
 | Height targets | 0.3 / 0.45 / 0.6 / 0.75 | ×L/0.75 | 0.138 / 0.207 / 0.276 / 0.345 |
 | Mini-Pi landmarks | – | measured (old audit) | lying 0.085, lowest balanced crouch 0.19, stance 0.345 |
 | Base-height σ | 0.12 m | ×L | 0.055 m |
@@ -274,9 +303,12 @@ Eq. 8 with the penalty method of Eq. 5:
 | Reset height | 0.1 m | – | measured settled poses |
 | Unactuated window | 30 policy steps = 0.6 s (actions 0 = hold default pose; assist and obs masked) | same | 30 steps; check the settle on Mini-Pi |
 
-Proposed stage heights: `h1 = 0.184` (≈ Mini-Pi's lowest balanced crouch 0.19),
-`h2 = 0.259`, `h3 = 0.345` (stance). Final values to be confirmed against settled
-measurements once the plant is fixed.
+Stage heights h1, h2, h3 remain **candidate Mini-Pi parameters**. Inputs for the
+mapping: the release height progression (targets 0.3/0.45/0.6/0.75, g3 switch at 0.40,
+i.e. 0.138/0.207/0.276/0.345 and 0.184 m after stance scaling) and Mini-Pi landmarks
+(lying 0.085, lowest balanced crouch 0.19, stance 0.345, to be re-measured on the final
+plant). The release gives no fixed second threshold (g4 is force/time based), so h2
+needs an independent, documented argument before it is fixed.
 
 Dimensioned reward coefficients (`torques`, `dof_acc`, `power`, `action_rate`, …) are
 **not** rescaled: the old `TORQUE_SCALE = 36` is dropped.

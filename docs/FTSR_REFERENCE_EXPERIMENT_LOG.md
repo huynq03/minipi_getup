@@ -19,3 +19,24 @@
   HTDW-5036-02 and come from an unverified summary (7.85 rad/s), the vendor URDF says
   21 rad/s, and torque caps disagree (16 / 6 ankle roll / 35 / none). The plant must be
   final from pretraining iteration 0, so no plant, pretraining or training was started.
+
+## 2026-10-07: audit corrections after review (no code, no training)
+
+- Eq. 5–8: separate cost critic no longer stated as required; `J_t,Ci` estimator,
+  `A_Ci` estimator, standardization scope, cost units and per-group terms marked
+  `PAPER_AMBIGUITY`; normalized costs are a hypothesis; β = 0.001 kept as the paper
+  baseline, its meaning depends on cost units.
+- Critic: release final critic input is `[E_t(x^t), o_t*, height map, base height]`
+  = 12 + 222 = 234 with the teacher latent for all rows; paper Table I says
+  `[z_t, s_t]`, s ∈ R^188, and Fig. 2 routes the student latent for student agents.
+  Both recorded as paper-vs-release conflicts.
+- h2 = 0.259 withdrawn: the release g4 condition depends on height and time; h1/h2/h3
+  stay candidate parameters.
+- Motor evidence reclassified by layer (physical capability / firmware / controller
+  software / simulation); URDF 21 Nm / 21 rad/s are URDF limits, not motor data.
+  Blocker unchanged.
+- `T_max`, `μ` marked UNRESOLVED calibration parameters.
+- New invariant: `q_target` clipped to physical per-joint ranges identically in
+  training and `deploy.yaml`.
+- 500 Hz sim PD vs 1 kHz-refreshed firmware PD recorded as an approximation needing
+  sensitivity validation.
