@@ -228,3 +228,17 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
   same over-constraint failure as the old `safe_v*` runs, now with soft costs. Also,
   even if it had worked, r_u/r_s stop shaping the get-up once the population
   reaches r_w.
+
+## ftsr_tune_smooth_v3 (tuning round 2)
+
+- Date: 2026-10-07 13:08 (after a machine reboot; previous runs had completed).
+  Code `c632134`. Task `Mjlab-FTSR-MiniPi-TuneSmooth2`.
+- Init: `--agent.resume` from `ftsr_repro_v1_cont3000/model_4000.pt` (iteration,
+  step counter (assist off), optimizer restored). 2000 it, 4000 → 6000. Control:
+  faithful `model_6000` (same budget).
+- Hypothesis: the get-up is shaped by r_w (population in r_w since it 815), whose
+  speed cost is too weak against ~15/s for lying. Change (one family, r_w motion
+  regularization): r_w dof_vel −0.01 → −0.04; r_w soft torque limit (> 7.2 Nm)
+  0 → −1.0.
+- Expected: peak joint speed / roll-pitch rate and the torque p99 (recovery and walking)
+  down, time to stand up, success ≥ 98 %, walking tracking roughly unchanged.
