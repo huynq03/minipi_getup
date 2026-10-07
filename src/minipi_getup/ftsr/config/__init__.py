@@ -6,6 +6,7 @@ from minipi_getup.ftsr.config.env_cfg import ftsr_env_cfg, ftsr_walk_env_cfg
 from minipi_getup.ftsr.config.rl_cfg import ftsr_runner_cfg, ftsr_walk_runner_cfg
 from minipi_getup.ftsr.config.tuning import (
   DEPLOY_ACTION_STEP,
+  DEPLOY_ASSIST_END_ITERATION,
   DEPLOY_MOTOR_CAP,
   DEPLOY_TORQUE_ENVELOPE,
   GENTLE_TARGET_STEP,
@@ -96,6 +97,7 @@ def _getup_deploy_cfg(play: bool):
     torque_limit=DEPLOY_TORQUE_ENVELOPE,
     dc_motor_effort_limit=DEPLOY_MOTOR_CAP,
     max_action_step=DEPLOY_ACTION_STEP,
+    assist_end_iteration=DEPLOY_ASSIST_END_ITERATION,
   )
 
 

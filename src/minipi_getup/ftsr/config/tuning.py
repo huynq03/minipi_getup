@@ -79,3 +79,8 @@ DEPLOY_TORQUE_ENVELOPE = 12.5
 DEPLOY_MOTOR_CAP = 16.0
 DEPLOY_ACTION_STEP = GENTLE_TARGET_STEP / ACTION_SCALE
 GETUP_DEPLOY = {"torque_limit": (-1.0, -1.0, -1.0)}
+
+# Round 4, v3: without the assist the fine-tune stalled (it 3500 -> 3882: ~40 %
+# standing, prone not relearned). Re-run the FTSR curriculum on the deploy env from the
+# Gentle weights, with a short assist schedule (off at it 1000 of the new run).
+DEPLOY_ASSIST_END_ITERATION = 1000

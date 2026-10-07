@@ -459,6 +459,7 @@ def ftsr_env_cfg(
   max_target_step: float = 0.0,
   dc_motor_effort_limit: float | None = None,
   max_action_step: float = 0.0,
+  assist_end_iteration: int = ASSIST_END_ITERATION,
 ) -> ManagerBasedRlEnvCfg:
   """Full FTSR task. ``stage_weight_overrides`` builds tuning variants.
 
@@ -513,7 +514,7 @@ def ftsr_env_cfg(
       "f_max": ASSIST_F_MAX,
       "t_max": ASSIST_T_MAX,
       "mu": ASSIST_MU,
-      "end_iteration": ASSIST_END_ITERATION,
+      "end_iteration": assist_end_iteration,
       "robot_weight": MINIPI_WEIGHT,
       "steps_per_iteration": STEPS_PER_ITERATION,
       "default_height_cmd": STAGE_HEIGHTS[0],
