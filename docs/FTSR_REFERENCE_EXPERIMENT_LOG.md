@@ -120,3 +120,40 @@
 
   Total −14.7 % per iteration (+17.3 % FPS), all in collection. ~3.2 s of
   collection remains, essentially the 0.5 ms x 40 physics.
+
+## 2026-10-07: walking v1 evaluation (model_600) and continuation
+
+Deterministic student, H-conservative, 16 envs per command, 10 s (8 s measured):
+
+- vx: corr 0.999; -0.34 -> -0.29, -0.15 -> -0.12, 0.15 -> 0.15, 0.3 -> 0.29,
+  0.54 -> 0.51 m/s. Zero command: drift 3.6 cm, no stepping. Falls 0 %.
+- Yaw while walking (vx 0.2, wz +-0.44): +-0.38 rad/s (86 %), no yaw bias at wz 0.
+- **Yaw in place (vx 0, wz +-0.44): no turning (-0.03 / -0.08 rad/s).**
+- Stepping: 3.4-5.1 touchdowns/s/foot, air fraction 0.15-0.39 while walking.
+- Torque max 13.7 Nm (calf), 0 % near the 16 Nm cap, 1.7 % above 6 Nm (longest
+  0.09 s). qdot > 3: 3.3 %, > 4: 0.76 % of samples, but 78 % of episodes touch > 4
+  rad/s once (hip yaw / ankle roll p99 4-5 rad/s). Joint-limit margin min -0.0185 rad.
+- Diagnosis: yaw reward still rising (1.64 / 1.75 / 1.84 per s at it 400 / 500 /
+  599) while vx tracking saturated; pure-yaw commands are ~10 % of samples and the
+  release kernel (sigma^2 0.261) still pays 47 % for standing still under 0.44 rad/s.
+- Smallest reference-consistent action: no method change; resume training from
+  model_600 for 300 iterations (`--agent.resume True --agent.load-run
+  2026-10-07_19-22-44_ftsr_ref_walk_v1 --agent.load-checkpoint model_600.pt`,
+  run `ftsr_ref_walk_v1_cont`), then re-evaluate.
+
+## 2026-10-07: walking init accepted (model_900); recovery v1 started
+
+- model_900 (after +300 iterations, no method change): vx corr 0.999 (-0.34 -> -0.31,
+  0.54 -> 0.52 m/s), yaw while walking +-0.38 / 0.39 rad/s for +-0.44, zero command
+  drift 3.6 cm, falls 0 %, 3.2-5.5 touchdowns/s/foot, torque max 12.8 Nm, 0 % near
+  cap, qdot > 4 rad/s 0.6 % of samples (86 % of episodes touch it once; p99 max 5.1
+  rad/s, hip yaw / ankle roll), joint-limit margin min -0.016 rad.
+- Still no turning in place (vx 0, wz +-0.44 -> -0.03 / -0.01 rad/s); 300 more
+  iterations did not change it. Accepted as "elementary walking" (paper Sec. III-A):
+  turning in place is not part of the recovery skill, r_w keeps training during
+  recovery, and a fix would change the reference command distribution or kernel
+  (a method change). Known limitation, revisit only if r_w behaviour after recovery
+  requires it.
+- Recovery v1: `uv run train Mjlab-FTSR-Ref-MiniPi-Recovery --env.scene.num-envs 4000
+  --agent.init-checkpoint /home/huy/minipi_getup/logs/rsl_rl/minipi_ftsr_ref_walk/2026-10-07_20-31-38_ftsr_ref_walk_v1_cont/model_900.pt --agent.run-name ftsr_ref_recovery_v1` (8000
+  iterations, assist to 3000, no-assist eval every 500 iterations), tmux getup:ref.
