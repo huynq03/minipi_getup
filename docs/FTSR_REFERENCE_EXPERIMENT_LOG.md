@@ -223,3 +223,25 @@ leave only 7 /m of pull at the current height, hence the smaller step.
   seated at 0.056 m (cos 0.83), prone 0.082 m. Recovery v2 started from walk model_900
   (`--agent.run-name ftsr_ref_recovery_v2`, log `logs/ftsr_ref_recovery_v2.log`,
   tmux getup:ref), same command as v1.
+
+## 2026-10-07: recovery v2 to iteration 500 vs v1
+
+| it | v1 S1 / S2 / F | v2 S1 / S2 / F | v2 rew | v2 qd>3 | v2 slew | v2 std |
+|---|---|---|---|---|---|---|
+| 100 | 0.32 / 0.13 / 29.7 | 0.38 / 0.19 / 27.0 | -21.0 | 13.8 % | 0.78 | 0.36 |
+| 200 | 0.13 / 0.09 / 32.1 | 0.33 / 0.21 / 26.2 | -7.0 | 9.4 % | 0.72 | 0.41 |
+| 300 | 0.03 / 0.01 / 35.1 | 0.30 / 0.25 / 24.9 | -0.7 | 3.6 % | 0.65 | 0.45 |
+| 400 | 0.02 / 0.00 / 35.1 | 0.44 / 0.41 / 18.7 | 4.2 | 2.4 % | 0.59 | 0.49 |
+| 499 | 0.01 / 0.00 / 36.1 | 0.46 / 0.43 / 18.1 | 9.5 | 2.3 % | 0.56 | 0.55 |
+
+- v1's S1 collapse is gone: in training 43 % of envs stand above h2 from the fallen
+  resets while Eq. 4 is zero above h_cmd = 0.19 (they hold their own weight up
+  there); the assist mean drops 27 -> 18 N and the foot contact-force term rises
+  0.11 -> 0.84 /s. Stage still r_u (S1 0.46 < 2/3). Bimodal population (S1 ~ S2).
+- eval_500 (no assist): 0 % success on all poses, never stood; max height p90
+  0.079-0.112 m; supine seated 0.057 m (cos 0.72), prone stays prone. The lift-off
+  from the ground still depends on the assistance (tc 0.83). Gentle dynamics: qd > 3
+  0.25-0.57 %, > 4 0.02-0.08 %, tau max 9.7-16 (near cap 0-0.03 %), slew 0.08,
+  margin min -0.042..-0.054 rad.
+- Per the decision points, no tuning on eval_500; continue. Watch std (0.45 -> 0.55;
+  v1 drifted to 0.79 while degrading) and S1 toward 2/3.
