@@ -54,3 +54,28 @@
   under H-conservative (ω₀ 7.85 rad/s) and H-loose (ω₀ 21 rad/s), both with τ_stall
   21 Nm and τ_cap 16 Nm as hypotheses; neither is the verified motor speed;
   H-conservative success is preferred.
+
+## 2026-10-07: Phase A, implementation and static validation (commit bcd00ee)
+
+- Audit 9791755 accepted by the user; H-conservative (ω0 7.85, stall 21, cap 16) is
+  the nominal provisional plant, H-loose (ω0 21) evaluation only.
+- Package `src/minipi_getup/ftsr_ref/`, tasks `Mjlab-FTSR-Ref-MiniPi-Walk` /
+  `-Recovery`. Decisions and classes: `docs/FTSR_REF_IMPLEMENTATION.md`.
+- Finding: with the motor envelope and no armature, 2 ms physics lets light joints
+  exceed the no-load speed (ankle roll 71, ankle pitch 18, hip yaw 13 rad/s vs 7.85);
+  the explicit per-step forcerange oscillates on the ankle roll (I = 4.4e-4 kg m²).
+  Fix without inventing a parameter: implicit piecewise actuator law + 0.5 ms × 40
+  physics (calf/yaw/ankle pitch then saturate at 7.83–7.94 rad/s). Armature remains an
+  open physical uncertainty.
+- Finding: passive settling of the fallen resets takes ~2 s under deploy Passive
+  (kd 1); window set to 100 steps (release 0.6 s).
+- Finding: Eq. 4 with F_max = 1.474 m g lifts a passive lying robot to 0.32 m within
+  1 s as the stage advances; kept as derived, 1.0 m g ablation planned.
+- validate.py: 25/25 pass. Smoke train: 4.2 s/iteration at 4000 envs.
+
+## 2026-10-07: Phase B, walking pretrain v1 started
+
+- `uv run train Mjlab-FTSR-Ref-MiniPi-Walk --env.scene.num-envs 4000
+  --agent.max-iterations 600 --agent.run-name ftsr_ref_walk_v1` (tmux getup:ref,
+  log `logs/ftsr_ref_walk_v1.log`). No gait clock, no legged shaping (release r_w with
+  robot replacements only), slew 0.06 rad/step, H-conservative.
