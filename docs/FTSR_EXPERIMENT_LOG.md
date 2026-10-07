@@ -356,3 +356,48 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
   ω_xy 13.7; success 99.9 %).
 - Correct-env eval, no assist: it 600 and 1000 → 0 % (faithful was 0 % at 1000 as
   well); peaks while trying q̇ 5.7–5.9 rad/s, ω_xy 3.9 rad/s.
+- Results (stand eval, correct env, 3 seeds × 400; peaks after the settle hold):
+
+  | it | success | t_stand mean / p90 | peak q̇ mean / max | peak v_z | peak ω_xy | τ p99 |
+  |---|---|---|---|---|---|---|
+  | 2000 | 0.7 % | – | 6.5 / 14.1 | 0.37 | 4.1 | 3.9 |
+  | 2500 | 0.3 % | – | 6.4 / 13.3 | 0.34 | 3.8 | 4.5 |
+  | 3000 | 98.3 % | 1.29 / 1.96 s | 8.1 / 16.9 | 0.74 | 6.8 | 7.3 |
+  | 3500 | **99.75 %** | 1.13 / 1.32 s | 7.9 / 18.3 | 0.78 | 7.4 | 7.4 |
+  | 4000 | 99.6 % | 1.09 / 1.23 s | 8.1 / 12.2 | 0.80 | 7.4 | 7.3 |
+
+- At 2500 (assist ≈ 17 %) the knee targets hit the rate limit on 37–48 % of steps,
+  other joints 1–3 %; torque never above 11.25 Nm. The policy still leaned on the
+  assist; it learned to get up alone as the assist reached 0 at 3000.
+- **Outcome: kept.** Versus faithful model_6000: peaks halved (q̇ 16.9 → 7.9,
+  v_z 1.37 → 0.78, ω_xy 13.7 → 7.4), get-up 0.73 → 1.13 s, success unchanged.
+
+## Motor data and deployment contract (2026-10-07)
+
+- User-supplied HTDW-5036-02 datasheet values: rated 6 Nm @ 50 rpm (5.24 rad/s),
+  no-load 75 rpm (7.85 rad/s), locked-rotor 21 Nm, 36:1 (the public product page only
+  confirms the module name and the 16 Nm robot maximum). The faithful policy's
+  17–24 rad/s are not reachable on hardware: the flat-cap actuator in sim was the gap.
+- Deployment (`/home/huy/Hightorque_Pi/mini_pi_fsm/deploy`, read only, nothing
+  modified): a policy is a config-only package (`params/deploy.yaml` +
+  `exported/policy.onnx`) run in the `Velocity` RL state, entered only from `FixStand`
+  (3 s interpolation to q = 0). `last_action` = the raw ONNX output of t−1 (0 at
+  entry). Motors run their own PD with no torque clamp. **Blocker:** `safety.yaml`
+  `enable_orientation: true`, `max_tilt_rad: 1.0` latches a fault on a lying robot.
+  User decision: plan A (config-only package + a safety-config change made by the
+  user), only once training succeeds; nothing in `/home/huy/Hightorque_Pi` is edited
+  by this work.
+
+## ftsr_getup_deploy (get-up-first round 4)
+
+- Task `Mjlab-FTSR-MiniPi-GetupDeploy` (`81d9a05`, armature fix `HEAD`):
+  `DcMotorActuator` (21 Nm stall, 7.85 rad/s, 16 Nm cap, armature 0.01 kg m²), a
+  `torque_limit` penalty above 12.5 Nm (−1/s per Nm), action rate limit 0.4/step from
+  `last_action` (0 after reset and while settling; `last_action` observes the limited
+  action) so the ONNX can apply it; zero commands.
+- v1 (no armature) diverged at once: the explicit torch PD made the light links chatter
+  at ~40 rad/s even while holding still (q̇ peaks 77–94 rad/s, τ pinned at 16 Nm);
+  stopped at it 3576. Armature 0.005+ removes it (holding still: max |q̇| ≈ 0.6).
+- Zero-shot, Gentle model_3500 in the deploy env: 48.7 % (supine 92.7 %, prone 2 %,
+  left 62 %, right 38 %), peak q̇ 7.4 / max 9.1 rad/s, τ max 16 Nm.
+- v2: resume Gentle model_3500, 1500 it (3500 → 5000), assist already off.
