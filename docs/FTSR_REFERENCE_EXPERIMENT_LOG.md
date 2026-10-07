@@ -245,3 +245,29 @@ leave only 7 /m of pull at the current height, hence the smaller step.
   margin min -0.042..-0.054 rad.
 - Per the decision points, no tuning on eval_500; continue. Watch std (0.45 -> 0.55;
   v1 drifted to 0.79 while degrading) and S1 toward 2/3.
+
+## 2026-10-07: h1 geometry check; v2 assisted diagnostic (model_900)
+
+- Static geometry (`cl_pai.xml`, symmetric legs, torso pitch +-1.2): max base height
+  by ground support: lying / seated (torso or hip on ground) 0.05-0.07 m; pelvis off
+  the ground on feet + thighs 0.10; kneeling on thighs + shins 0.155; **upright
+  kneeling on the shins 0.197**, shins + feet 0.202; deepest flat-foot squat with
+  upright torso 0.188 (hip -1.25 and knee 1.65 at their limits); stance 0.345. So
+  h1 = 0.19 is not passed by lifting the pelvis, but upright kneeling (0.197) passes
+  it without the feet: h1 cannot tell kneeling from a deep squat. Open item.
+- `evaluate.py --assist-tc`: diagnostic only, re-enables the training Eq. 4 at a fixed
+  time coefficient; recovery evals now classify the ground support (feet / shins /
+  thighs / hips / base, lowest geom point < 1 cm).
+- v2 model_900, deterministic student, assist tc 0.70: all four poses reach h1 within
+  the first fraction of a second and stay above it 98-99 % of the actuated time;
+  100 % of envs end above h1 at 0.22-0.24 m, upright cos 0.90-0.96, **feet only**
+  (> 99.6 % of above-h1 time; shins touch 0.1-0.4 %): a flat-foot crouch near the
+  0.214 target, not kneeling. No pose is dominant or left behind.
+- Same model without assistance (eval_1000): 0 % above h1 on every pose, max height
+  p90 0.10-0.12 m. The lift-off comes from Eq. 4 (at h = 0.08 m and tc 0.7 it gives
+  ~62 N = 0.9 m g); the policy only extends the legs under it.
+- Training S1 (0.5-0.6) is far below the deterministic 100 %: the stage population
+  includes the 2 s passive window (~10 % of envs lying) and the stochastic actions;
+  the policy std has risen 0.45 (it 300) -> 0.67 (it 763) -> 0.92 (it 1183) under
+  the release entropy coefficient 0.01. The 2/3 rule is evaluated on that noisy
+  population, so exploration noise now gates the r_u -> r_s switch.

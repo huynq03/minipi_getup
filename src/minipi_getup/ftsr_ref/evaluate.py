@@ -45,7 +45,10 @@ STAND_H = 0.9 * STAGE_HEIGHTS[2]
 STAND_UP = math.cos(math.radians(18.0))
 
 
-def build_env(task: str, n: int, motor: str, mutate=None):
+def build_env(task: str, n: int, motor: str, mutate=None, assist_tc=None):
+  """Play cfg (no noise, no assistance). ``assist_tc``: diagnostic only, re-enables
+  the training Eq. 4 assistance frozen near that time coefficient (the env step
+  counter is set to (1 - tc) t_tag; it drifts by < 0.02 over one episode)."""
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.tasks.registry import load_env_cfg
 
@@ -53,11 +56,63 @@ def build_env(task: str, n: int, motor: str, mutate=None):
   cfg.scene.num_envs = n
   cfg.actions["joint_pos"].motor = copy.deepcopy(MOTOR_HYPOTHESES[motor])
   assert cfg.actions["joint_pos"].assist is None
+  if assist_tc is not None:
+    train_assist = load_env_cfg(task, play=False).actions["joint_pos"].assist
+    cfg.actions["joint_pos"].assist = copy.deepcopy(train_assist)
   if mutate is not None:
     mutate(cfg)
   env = ManagerBasedRlEnv(cfg, device=DEV)
   env.reset()
+  if assist_tc is not None:
+    t_tag = cfg.actions["joint_pos"].assist.t_tag
+    env.common_step_counter = int(round((1.0 - assist_tc) * t_tag))
   return env
+
+
+# Ground-contact groups for the support classification (collision geoms only).
+SUPPORT_GROUPS = ("foot", "calf", "thigh", "hip", "base")
+
+
+class SupportTracker:
+  """Which body parts touch the ground (lowest geom point < 1 cm), per env step."""
+
+  def __init__(self, env):
+    import mujoco
+
+    mm = env.sim.mj_model
+    ids, grp = [], []
+    for g in range(mm.ngeom):
+      if mm.geom_contype[g] == 0 and mm.geom_conaffinity[g] == 0:
+        continue
+      if mm.geom_type[g] not in (
+        mujoco.mjtGeom.mjGEOM_CAPSULE,
+        mujoco.mjtGeom.mjGEOM_SPHERE,
+      ):
+        continue
+      name = mujoco.mj_id2name(mm, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+      for i, key in enumerate(SUPPORT_GROUPS):
+        if key in name:
+          ids.append(g)
+          grp.append(i)
+          break
+    self.env = env
+    self.ids = torch.tensor(ids, device=DEV)
+    self.grp = torch.nn.functional.one_hot(
+      torch.tensor(grp, device=DEV), len(SUPPORT_GROUPS)
+    ).float()
+    size = torch.tensor(mm.geom_size[ids], device=DEV, dtype=torch.float32)
+    caps = torch.tensor(mm.geom_type[ids] == mujoco.mjtGeom.mjGEOM_CAPSULE, device=DEV)
+    self.radius = size[:, 0]
+    self.half = torch.where(caps, size[:, 1], torch.zeros_like(size[:, 1]))
+
+  def touching(self) -> torch.Tensor:
+    """(N, groups) bool."""
+    d = self.env.sim.data
+    pos = d.geom_xpos[:, self.ids]
+    axz = d.geom_xmat[:, self.ids].reshape(pos.shape[0], -1, 9)[..., 8]
+    low = pos[..., 2] - self.half * axz.abs() - self.radius
+    low = low - self.env.scene.env_origins[:, 2:3]
+    return ((low < 0.01).float() @ self.grp) > 0
 
 
 class Recorder:
@@ -226,16 +281,46 @@ def _height_summary(h: torch.Tensor, up: torch.Tensor, last: int) -> dict:
   }
 
 
-def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> dict:
+def _support_summary(sup: torch.Tensor, h: torch.Tensor, last: int) -> dict:
+  """sup (n, T, groups) bool, h (n, T), actuated steps only. Support classes while
+  the base is above h1: feet only / feet + shin (half kneel) / shin without feet
+  (kneeling) / other. Also the class at the end of the episode (last 3 s)."""
+  foot, calf = sup[..., 0], sup[..., 1]
+  other = sup[..., 2:].any(-1)
+  cls = torch.full(h.shape, 3, dtype=torch.long, device=h.device)
+  cls[foot & ~calf & ~other] = 0
+  cls[foot & calf & ~other] = 1
+  cls[~foot & calf & ~other] = 2
+  above = h > STAGE_HEIGHTS[0]
+  names = ("feet_only", "feet_and_shin", "shin_no_feet", "other")
+  n_above = above.sum().clamp(min=1)
+  out = {
+    f"above_h1_{nm}": float(((cls == i) & above).sum() / n_above)
+    for i, nm in enumerate(names)
+  }
+  end = cls[:, -last:]
+  end_above = above[:, -last:]
+  for i, nm in enumerate(names):
+    out[f"final_above_h1_{nm}"] = float(((end == i) & end_above).float().mean())
+  out["final_below_h1"] = float((~end_above).float().mean())
+  for i, g in enumerate(SUPPORT_GROUPS):
+    out[f"touch_frac_{g}"] = float(sup[..., i].float().mean())
+  return out
+
+
+def evaluate_recovery(
+  model, task, motor, per_pose, policy_mode="student", assist_tc=None
+) -> dict:
   npose = len(FALLEN_POSE_NAMES)
   n = per_pose * npose
 
   def mutate(cfg):
     cfg.events["reset_pose"].params["by_env_index"] = True
 
-  env = build_env(task, n, motor, mutate)
+  env = build_env(task, n, motor, mutate, assist_tc)
   t = env.action_manager.get_term("joint_pos")
   pose = env.extras[POSE_KEY].clone()
+  support = SupportTracker(env)
   m = MOTOR_HYPOTHESES[motor]
   rec = Recorder(env, pose, npose, m.tau_rated, m.tau_cap)
   _attach(env, rec)
@@ -244,6 +329,7 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
   hist = torch.zeros(n, T, dtype=torch.bool, device=DEV)
   heights = torch.zeros(n, T, device=DEV)
   ups = torch.zeros(n, T, device=DEV)
+  sup = torch.zeros(n, T, len(SUPPORT_GROUPS), dtype=torch.bool, device=DEV)
   t.monitor.clear()
   obs = env.get_observations()
   with torch.no_grad():
@@ -260,6 +346,7 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
       hist[:, k] = (h > STAND_H) & (up > STAND_UP)
       heights[:, k] = h
       ups[:, k] = up
+      sup[:, k] = support.touching()
   dt = env.step_dt
   passive = t.cfg.passive_steps
   last = int(3.0 / dt)
@@ -277,7 +364,13 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
     if bool(ever[i]):
       fell[i] = bool((heights[i, int(first[i]) :] < STAGE_HEIGHTS[1]).any())
   monitor = t.monitor.summary(t.joint_names)
-  out = {"task": task, "motor": motor, "policy": policy_mode, "per_pose": {}}
+  out = {
+    "task": task,
+    "motor": motor,
+    "policy": policy_mode,
+    "assist_tc": assist_tc,
+    "per_pose": {},
+  }
   for g, name in enumerate(FALLEN_POSE_NAMES):
     rows = pose == g
     tts = (first[rows & ever].float() - passive) * dt
@@ -289,6 +382,7 @@ def evaluate_recovery(model, task, motor, per_pose, policy_mode="student") -> di
       "time_to_stand_s_mean": float(tts.mean()) if tts.numel() else None,
       "time_to_stand_s_p90": float(tts.quantile(0.9)) if tts.numel() else None,
       **_height_summary(heights[rows, passive:], ups[rows, passive:], last),
+      **_support_summary(sup[rows, passive:], heights[rows, passive:], last),
       **rec.group_summary(g, rows),
     }
   out["success_min_pose"] = min(v["success"] for v in out["per_pose"].values())
@@ -409,13 +503,24 @@ def main() -> None:
   ap.add_argument("--num-envs-per-pose", type=int, default=64)
   ap.add_argument("--policy", default="student", choices=("student", "teacher"))
   ap.add_argument("--out", default="")
+  ap.add_argument(
+    "--assist-tc",
+    type=float,
+    default=None,
+    help="diagnostic: enable the training Eq. 4 assistance at this time coefficient",
+  )
   args = ap.parse_args()
   model = load_model(args.checkpoint).to(DEV)
   if args.task.endswith("Walk"):
     out = evaluate_walk(model, args.task, args.motor)
   else:
     out = evaluate_recovery(
-      model, args.task, args.motor, args.num_envs_per_pose, args.policy
+      model,
+      args.task,
+      args.motor,
+      args.num_envs_per_pose,
+      args.policy,
+      args.assist_tc,
     )
   out["checkpoint"] = os.path.abspath(args.checkpoint)
   text = json.dumps(out, indent=1)
