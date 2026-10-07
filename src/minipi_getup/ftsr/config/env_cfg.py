@@ -48,6 +48,8 @@ from minipi_getup.ftsr.config.stage_rewards import (
   ANG_VEL_KERNEL,
   HEIGHT_KERNEL,
   LIN_VEL_KERNEL,
+  SPEED_CAP_RAMP_ITERATIONS,
+  SPEED_CAPS,
   STAGE_HEIGHTS,
   STAGE_WEIGHTS,
   TRACKING_MIN_HEIGHT,
@@ -256,6 +258,20 @@ def _rewards(
       weight=0.0,
       params={"limit": 0.8 * OPERATIONAL_TORQUE_LIMIT},
     ),
+    # Soft speed caps (not in Table II; off in the faithful task, see tuning.py).
+    **{
+      f"{quantity}_excess": RewardTermCfg(
+        func=mdp.motion_speed_excess,
+        weight=0.0,
+        params={
+          "quantity": quantity,
+          "limit": limit,
+          "ramp_steps": SPEED_CAP_RAMP_ITERATIONS * STEPS_PER_ITERATION,
+          "asset_cfg": _TORSO,
+        },
+      )
+      for quantity, limit in SPEED_CAPS.items()
+    },
   }
   assert set(terms) == set(weights)
   for name, term in terms.items():
@@ -426,10 +442,20 @@ def _stage_weights(
 def ftsr_env_cfg(
   play: bool = False,
   stage_weight_overrides: dict[str, tuple[float, float, float]] | None = None,
+  stand_only: bool = False,
 ) -> ManagerBasedRlEnvCfg:
-  """Full FTSR task. ``stage_weight_overrides`` builds tuning variants."""
+  """Full FTSR task. ``stage_weight_overrides`` builds tuning variants.
+
+  ``stand_only`` commands zero velocity in every env: after getting up the robot
+  only has to stand (get-up-first variants).
+  """
   weights = _stage_weights(stage_weight_overrides)
   cfg = _base_cfg(play, weights)
+  if stand_only:
+    twist = cfg.commands["twist"]
+    twist.rel_standing_envs = 1.0
+    twist.ranges.lin_vel_x = (0.0, 0.0)
+    twist.ranges.ang_vel_z = (0.0, 0.0)
   n = len(FALLEN_POSE_NAMES)
   cfg.events["reset_pose"] = EventTermCfg(
     func=mdp.reset_pose_distribution,

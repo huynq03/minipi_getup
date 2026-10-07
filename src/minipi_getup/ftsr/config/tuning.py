@@ -29,3 +29,17 @@ SMOOTH_V2 = {
   "dof_vel": (*STAGE_WEIGHTS["dof_vel"][:2], -0.04),
   "torque_limit": (0.0, 0.0, -1.0),
 }
+
+# Get-up-first variant (user request, 2026-10-07): a get-up slow and gentle enough to
+# try on hardware, with the robot only standing afterwards (``stand_only``). In r_w
+# every second spent upright earns the height and zero-command tracking rewards, so
+# rising faster always pays, and nothing penalizes speed. Soft caps on joint speed,
+# torso vertical speed and roll/pitch rate (SPEED_CAPS, squared excess, ramped in)
+# act in every stage. Rough balance: the faithful get-up's peaks (17 rad/s over
+# ~3 joints, 1.4 m/s, 14 rad/s, each for ~0.2 s) would cost ~40, 11 and 29 per
+# episode, against ~16 gained by standing 1 s earlier.
+GETUP_SOFT = {
+  "joint_vel_excess": (-0.5, -0.5, -0.5),
+  "base_vz_excess": (-50.0, -50.0, -50.0),
+  "base_wxy_excess": (-1.0, -1.0, -1.0),
+}

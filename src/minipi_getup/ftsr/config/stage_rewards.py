@@ -65,4 +65,15 @@ STAGE_WEIGHTS: dict[str, tuple[float, float, float]] = {
   "feet_gait": (0.0, 0.0, 1.5),
   # Not in Table II (released code's pen_torque_limits); off in the faithful baseline.
   "torque_limit": (0.0, 0.0, 0.0),
+  # Soft speed caps (SPEED_CAPS); not in the paper, off in the faithful task.
+  "joint_vel_excess": (0.0, 0.0, 0.0),
+  "base_vz_excess": (0.0, 0.0, 0.0),
+  "base_wxy_excess": (0.0, 0.0, 0.0),
 }
+
+# Speed above which the *_excess terms penalize (squared excess). Chosen for a get-up
+# that a hardware test can follow: the faithful policy peaks at ~17 rad/s joint
+# speed, 1.4 m/s torso vertical speed and ~14 rad/s roll/pitch rate (< 1 s get-up).
+SPEED_CAPS = {"joint_vel": 4.0, "base_vz": 0.3, "base_wxy": 1.5}
+# The caps' weights ramp in linearly over this many iterations after (re)start.
+SPEED_CAP_RAMP_ITERATIONS = 300

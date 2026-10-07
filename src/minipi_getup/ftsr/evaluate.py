@@ -45,6 +45,8 @@ COMMANDS = (
   (0.0, 0.0, 0.4),
   (0.2, 0.0, -0.3),
 )
+# ``--commands stand``: every env gets the zero command (get-up-first evaluation).
+STAND_COMMANDS = ((0.0, 0.0, 0.0),)
 STAND_HEIGHT = 0.31
 STAND_UP = 0.95
 FALL_HEIGHT = 0.2
@@ -395,6 +397,7 @@ def main() -> None:
   ap.add_argument("--envs", type=int, default=400)
   ap.add_argument("--seconds", type=float, default=None)
   ap.add_argument("--mode", choices=("student", "teacher"), default="student")
+  ap.add_argument("--commands", choices=("mixed", "stand"), default="mixed")
   ap.add_argument("--run-name", default="")
   ap.add_argument("--out", default="logs/ftsr_analysis/results.csv")
   ap.add_argument("--device", default="cuda:0")
@@ -407,6 +410,9 @@ def main() -> None:
     help="diagnostic: evaluate WITH the Eq. 4 assist at this training iteration",
   )
   args = ap.parse_args()
+  if args.commands == "stand":
+    global COMMANDS
+    COMMANDS = STAND_COMMANDS
 
   seconds = args.seconds or (20.0 if args.task == "recovery" else 10.0)
   rel = None if args.action_relative is None else args.action_relative == "true"
@@ -437,6 +443,7 @@ def main() -> None:
       "task": args.task,
       "mode": args.mode,
       "seeds": " ".join(map(str, args.seeds)),
+      "commands": args.commands,
       "episodes": args.envs * len(args.seeds),
       "assistance_force": 0.0 if args.assist_iteration is None else -1.0,
       "assist_iteration": args.assist_iteration,

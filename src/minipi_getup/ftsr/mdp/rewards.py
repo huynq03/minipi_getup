@@ -258,3 +258,39 @@ def feet_gait(
   cmd = env.command_manager.get_command(command_name)
   assert cmd is not None
   return reward * (torch.linalg.norm(cmd, dim=-1) > command_threshold).float()
+
+
+class motion_speed_excess:
+  """Soft speed cap: sum(relu(|x| - limit)^2), ramped in over ``ramp_steps`` calls.
+
+  ``quantity`` selects x: ``joint_vel`` (rad/s, every joint), ``base_vz`` (torso
+  vertical speed, m/s) or ``base_wxy`` (torso roll/pitch rate norm, rad/s). Motion
+  under the limit costs nothing, so the get-up stays feasible; only the violent peaks
+  are penalized. The ramp (counted in env steps from term construction, so it also
+  starts at 0 when a run is resumed) lets a policy that already gets up adapt instead
+  of collapsing under a sudden large penalty.
+  """
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv):
+    self._calls = 0
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    quantity: str,
+    limit: float,
+    ramp_steps: int = 0,
+    asset_cfg: SceneEntityCfg = _TORSO,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    if quantity == "joint_vel":
+      x = asset.data.joint_vel
+    elif quantity == "base_vz":
+      x = asset.data.root_link_lin_vel_w[:, 2:3]
+    elif quantity == "base_wxy":
+      x = asset.data.root_link_ang_vel_b[:, :2].norm(dim=-1, keepdim=True)
+    else:
+      raise ValueError(quantity)
+    self._calls += 1
+    ramp = 1.0 if ramp_steps <= 0 else min(1.0, self._calls / ramp_steps)
+    return ramp * torch.square(torch.relu(x.abs() - limit)).sum(dim=-1)
