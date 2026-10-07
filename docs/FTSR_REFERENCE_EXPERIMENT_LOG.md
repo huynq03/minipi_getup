@@ -353,3 +353,25 @@ leave only 7 /m of pull at the current height, hence the smaller step.
   --agent.load-checkpoint model_2150.pt --agent.max-iterations 5850 --agent.run-name
   ftsr_ref_recovery_v2_r2150` (log `logs/ftsr_ref_recovery_v2_r2150.log`, run dir
   `2026-10-08_00-21-57_ftsr_ref_recovery_v2_r2150`); tc continues 0.284 -> 0.272.
+
+## 2026-10-08 00:31: v2 crashed with NaN at iteration 2279 (stopped, not restarted)
+
+- `ValueError: Expected parameter loc ... Normal ... found invalid values: nan` in
+  `FtsrRunner._update` (runner.py:288, `torch.distributions.Normal(mean, std)` on a
+  PPO minibatch), iteration 2279 of the resumed run (`..._v2_r2150`), 129 iterations
+  after the resume. The rollout of that iteration completed (the rollout also builds
+  `Normal(mean, std)` from the actor obs and would have raised first), so the actor
+  inputs of the rollout were finite; the actor parameters became non-finite during
+  the update (an earlier minibatch's optimizer step).
+- No precursor in the logged scalars up to 2278: grad_norm 1.6-2.6, value loss
+  0.16-0.21, kl 0.011-0.015, lr 1-2e-4, std 2.2348 constant, Episode_Termination/nan
+  0, qd_max 8.9-9.4 rad/s, Eq. 8 penalty std 0.10. Iteration 2279's own rollout stats
+  were never logged.
+- Last checkpoints: `model_2200.pt`, `model_2250.pt` (all parameters finite, std
+  1.66-2.47 per joint, max |param| 12.4).
+- Candidates (unverified): (a) an extreme but finite observation (a physics spike in
+  one env; the env's NaN termination only catches NaN) giving an overflowing loss /
+  gradient norm, after which clip_grad_norm multiplies inf by 0; (b) PPO ratio
+  exp(logp - logp_old) overflow (the std is 2.2, actions are unclipped samples);
+  (c) a non-finite critic / cost / reward input (not used by the rollout's action).
+  No guard exists in the update (same as rsl_rl).
