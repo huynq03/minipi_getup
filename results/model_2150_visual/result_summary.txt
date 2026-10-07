@@ -1,0 +1,55 @@
+checkpoint: model_2150
+  logs/rsl_rl/minipi_ftsr_ref/2026-10-07_21-53-02_ftsr_ref_recovery_v2/model_2150.pt
+  (Recovery v2, stateless stages, H-conservative plant; student policy, deterministic)
+
+measured no-assist recovery-to-foot-support:
+    supine: 8%
+    prone: 22%
+    left: 12%
+    right: 11%
+  (64 envs per pose, earlier diagnostic run; criterion: last 3 s mean base height
+   > h1 = 0.19 m and mean tilt < 18 deg; all recovered envs stand on the feet only,
+   at ~0.277 m)
+
+tc=0.2:
+    100% recovery in all four poses
+    approximate lying assist: ~18 N (~0.26 mg)
+
+note:
+    simulation only
+    current policy is not hardware-ready
+
+--- this demo (videos/, images/, demo_record*.json) ---
+recorded with: python -m minipi_getup.ftsr_ref.visual_demo (seed 2150; supine
+example success searched with seed 2151); same rollout as evaluate.py; physics,
+rewards, resets, action limits and assist force unchanged.
+
+no-assist recovery rate in the demo runs (64 envs per pose each):
+    seed 2150: supine 0/64 (0%), prone 16/64 (25%), left 12/64 (19%), right 8/64 (12.5%)
+    seed 2151: supine 2/64 (3%)
+  -> the rate varies with the reset seed; supine is the weakest pose.
+
+videos/no_assist/  (selected = first env of each pose, kept whatever its outcome)
+    supine     selected seed 2150 env 0   FAILED
+               selected seed 2151 env 0   FAILED
+               example success seed 2151 env 92   RECOVERED  (example, not a rate)
+    prone      selected seed 2150 env 1   FAILED
+               example success seed 2150 env 21   RECOVERED  (example, not a rate)
+    left_side  selected seed 2150 env 2   FAILED
+               example success seed 2150 env 18   RECOVERED  (example, not a rate)
+    right_side selected seed 2150 env 3   RECOVERED
+
+videos/assist_tc_0p2/  (seed 2150, 64/64 recovered in every pose)
+    supine env 0, prone env 1, left_side env 2, right_side env 3: RECOVERED
+  Caveat: with every env up, the (stateless) evaluation population reaches stage r_w,
+  so Eq. 4 targets h_cmd = 0.345 m and keeps pushing ~13.4 N (0.20 mg) on the
+  standing robot (~0.28 m). The tc = 0.2 videos are assisted throughout, not only
+  while lying. The live assist force and stage are shown in every frame.
+
+"RECOVERED" here = foot-support recovery as defined above. The stricter evaluation
+`success` (base > 0.31 m and tilt < 18 deg for the last 3 s) is false in every
+video: the policy stands at its r_s target 0.276 m.
+
+Known issues of this policy (no-assist evaluation): joint speed > 4 rad/s in
+1.2-1.9 % of samples, torque reaches the 16 Nm cap, joint-limit overshoot up to
+0.22 rad. Not hardware-ready.
