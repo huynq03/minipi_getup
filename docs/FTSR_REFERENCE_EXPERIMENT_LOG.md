@@ -286,3 +286,32 @@ leave only 7 /m of pull at the current height, hence the smaller step.
   Eq. 4 falls 0.276 -> 0.19, removing the support of every env between 0.19 and
   0.276, and S1 crashes to ~0.3 within 1-2 iterations; ~60 iterations to recover.
   std 0.97 -> 1.03.
+
+## 2026-10-07: v2 third r_s visit holds; v3 (monotonic stage) prepared, deferred
+
+- Third r_s entry at it ~1472 held (165+ iterations by it 1637, cycles 1-2 lasted
+  25-35): S1 0.87-0.89, S2 0.41-0.58, assist mean 2.2-3.9 N (tc 0.45-0.50), reward
+  -> 83, qd > 3 ~4.8 %, > 4 ~0.6 %, slew 0.44. No NaN.
+- eval_1500 (no assist): still 0 % on every pose, max height p90 0.10-0.12 m, final
+  0.08-0.09 m; tau max 9.3-16, qd > 3 0.55-0.79 %, > 4 0.04-0.10 %, slew 0.055,
+  joint-limit margin min -0.046..-0.107 rad (right_side).
+- Policy std 1.03 (it 1464) -> 1.64 (it 1635) under entropy 0.01. Observation (not
+  acted on): the 0.06 rad/step target slew low-passes the action noise, so a large
+  std costs the policy little in reward while the entropy bonus keeps rewarding it.
+- Recovery v3 implemented and tested, **not started** (user decision: keep v2
+  running, defer v3): `8c95ec7` "ftsr: latch recovery curriculum stages
+  monotonically". PAPER_AMBIGUITY: the paper describes height-progressive
+  stage-wise curriculum transitions but does not clearly specify whether completed
+  stages may regress. The released implementation recomputes the stage statelessly
+  and permits regression. On Mini-Pi this caused a reproducible 0<->1 limit cycle
+  (it 1251-1287 and 1376-1402) because h_cmd also controls the external assistance
+  wrench. v3 interprets stages as monotonic curriculum progression: once the > 2/3
+  criterion is satisfied, the stage is latched (0 -> 1 on S1, 1 -> 2 on S2, never
+  back). Stage stored in checkpoints (`infos.env_state.ftsr_stage`), restored on
+  resume; weights-only init (walking model_900) starts at 0. Tests 26 (A-E) and 27
+  (F/G + weights-only init -> 0); full suite 27/27 (512 s).
+- Note: the Recovery task config in HEAD is now monotonic. Resuming the v2 run
+  would need `monotonic=False` (commit 3744b1c config) to keep v2 semantics.
+- v3 command when started: `uv run train Mjlab-FTSR-Ref-MiniPi-Recovery
+  --env.scene.num-envs 4000 --agent.init-checkpoint /home/huy/minipi_getup/logs/rsl_rl/minipi_ftsr_ref_walk/2026-10-07_20-31-38_ftsr_ref_walk_v1_cont/model_900.pt
+  --agent.run-name ftsr_ref_recovery_v3_monotonic_stage`.
