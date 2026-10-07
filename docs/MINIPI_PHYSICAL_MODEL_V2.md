@@ -90,7 +90,58 @@ get-up waypoint sequences for all four fallen poses
 keyframes, motor space, up to ~2.4 rad between keyframes). Their timing lives in a
 prebuilt binary and is not recoverable from source.
 
-## 5. Actuator model plan (once §4 is resolved)
+## 4b. Operational joint-speed contract (user requirement, 2026-10-07)
+
+The real Mini-Pi must not execute very fast joint motion during initial real-world
+get-up testing. This is a **hardware/deployment contract**, not an RL tuning term.
+
+**Motor physical no-load speed ≠ allowed operational joint speed.** The unknown
+HTDW-5047 maximum speed (§4) stays an unresolved physical parameter; the robot is not
+to be operated near it either way.
+
+| Element | Value | Kind |
+|---|---|---|
+| Policy rate | 50 Hz | contract |
+| `q_target` slew limit | **3.0 rad/s → 0.06 rad per policy step**, per joint, relative to the previous **commanded** target | hard, in the action path (sim, eval, deploy runtime) |
+| Preferred (soft) `q̇` envelope | ≈ 3 rad/s | moderate penalty and monitor; must not block discovery of the skill |
+| Hardware emergency `q̇` threshold | ≈ 4 rad/s initially (may be tuned conservatively before the first real actuation) | deploy fault in the GetUp state; evaluated in simulation as a deployment failure |
+
+Action path, identical in training, evaluation and the deploy runtime:
+
+```
+network raw action a
+  -> raw clip                         a_c = clip(a, raw_clip)
+  -> absolute target                  q_cmd = q_default + action_scale · a_c
+  -> physical per-joint clip          q_cmd = clip(q_cmd, q_min_j, q_max_j)
+  -> slew limit                       q*_t = clip(q_cmd, q*_{t-1} − 0.06, q*_{t-1} + 0.06)
+  -> PD (held 20 ms)                  τ = kp (q*_t − q) − kd q̇   (within the motor envelope)
+```
+
+- Measured `q̇` is never clamped; it remains a physical state.
+- `q*_{t-1}` is the previous **commanded** target (after the slew), a runtime state.
+  Its initialization at state entry is part of the contract and must be the same in
+  simulation and in the GetUp state (decision for implementation: the target the
+  robot is actually holding at entry; see the deployment contract).
+- The target slew limits commanded speed only; gravity, impacts and PD tracking can
+  still produce `|q̇| > 3 rad/s`. Evaluation reports the fraction of time and episodes
+  above 3 and above 4 rad/s.
+
+### Motor-capability hypotheses for simulation
+
+The plant is built with an explicit hypothesis, evaluated at least under:
+
+| Hypothesis | ω₀ (no-load, joint) | τ_stall | τ_cap | Status |
+|---|---|---|---|---|
+| H-conservative | 7.85 rad/s | 21 Nm (user summary, HTDW-5036-02) | 16 Nm (product page robot max) | hypothesis, **preferred target** |
+| H-loose | 21 rad/s (vendor URDF joint limit) | 21 Nm | 16 Nm | hypothesis |
+
+Neither is the verified real motor speed. The operational 3 rad/s slew contract is the
+same under both. A policy that succeeds under H-conservative while respecting the slew
+envelope is preferred. The ankle-roll 6 Nm limit of `pai_control` is an open
+sensitivity check. Under both hypotheses the curve allows ≥ 13 Nm at the 3 rad/s
+operating envelope (H-conservative: `21·(1 − 3/7.85)` = 13.0 Nm).
+
+## 5. Actuator model plan
 
 - Keep MuJoCo's **native position actuator** (stable at 2 ms with zero
   armature, as all previous Mini-Pi training showed).
@@ -105,7 +156,10 @@ prebuilt binary and is not recoverable from source.
   local document.
 - Rated torque (if verified) is monitored (time above rated), not enforced.
 
-## 6. What is needed from the user
+## 6. Still needed from the user (no longer blocking implementation)
+
+The user directed implementation to proceed under the two hypotheses of §4b. The
+verified envelope is still needed before real actuation.
 
 Separately for: motor physical capability, firmware/current limit, the controller
 software limit to use on mini_pi_fsm, and (derived from those) the simulation limit.

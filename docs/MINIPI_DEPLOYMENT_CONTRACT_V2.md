@@ -17,7 +17,7 @@ checked in the current code; nothing is taken from older notes.
 | 9 | Action scaling | per-joint `scale` (scalar or list) | `joint_actions.h` |
 | 10 | Action clipping | optional `raw_clip [lo, hi]` on the network output | `joint_actions.h` |
 | 11 | Target clipping | optional per-joint `clip [[lo,hi]×n]` on `q_target` | `joint_actions.h` |
-| 12 | Slew / rate limit | **none** (no action or target slew limiter exists) | `joint_actions.h`, `RLPolicyRunner.cpp` |
+| 12 | Slew / rate limit | **none today** (no action or target slew limiter exists). Required by the user's operational contract: a GetUp-state `q_target` slew limit of 0.06 rad per 20 ms step (3 rad/s), see below | `joint_actions.h`, `RLPolicyRunner.cpp` |
 | 13 | Motor command | `pos_vel_tqe_kp_kd2(q*, dq=0, τ_ff=0, kp, kd)` | `HighTorqueHardware.cpp:235–242` |
 | 14 | Software torque clamp | none (`enable_torque_limit: false`) | `safety.yaml` |
 | 15 | Firmware torque limit | unknown; `tor_limit_enable: false` in the loaded robot param file; SDK exposes `motor_torque_limit_flag` | `12dof_STM32H730_pi_lubancat_params.yaml`, `HighTorqueHardware.cpp:280` |
@@ -52,12 +52,13 @@ Extra findings:
 
 ## Consequences for the get-up port
 
-1. **Interface fits without C++**: actor `o_t` and the student history can be two
-   ONNX inputs (two groups: history group with `use_gym_history: true`,
-   `history_length: 5`, and a current-frame group), per-joint scale, `raw_clip` to match
-   training. The action is a plain `clip_target(default + scale·raw_clip(a))`; no slew
-   limiter, so training must not use one. The per-joint target clip must equal the
-   physical joint ranges (or documented margins) used in training.
+1. **Observation interface fits without C++**: actor `o_t` and the student history can
+   be two ONNX inputs (two groups: history group with `use_gym_history: true`,
+   `history_length: 5`, and a current-frame group). Per-joint scale, `raw_clip` and the
+   per-joint physical target clip are expressible in `deploy.yaml`; the target clip must
+   equal the physical joint ranges (or documented margins) used in training.
+   **The action path is not**: the required slew limit has no runtime support yet
+   (item 4 below).
 2. **A lying robot cannot run any policy today**: the global orientation check latches
    a fault while lying (tilt ≈ π/2 > 1.0), and the single RL runner is bound to
    `Velocity`, entered only through FixStand. Running a get-up policy needs a C++
@@ -68,3 +69,21 @@ Extra findings:
    the user forbade edits in `/home/huy/Hightorque_Pi` until training succeeds).
 3. **gait clock**: if a Mini-Pi-only gait phase is used in r_w, it must be in one group
    only.
+4. **Required GetUp-state action slew limiter (to add to mini_pi_fsm before any real
+   actuation; not implemented now):**
+   - Order: raw network output → `raw_clip` → `q_default + scale·a` → physical
+     per-joint target clip → slew limit `|q*_t − q*_{t−1}| ≤ 0.06 rad` → motor command.
+   - The slew is applied in the runtime action term, **not** inside the ONNX: it needs
+     the previous commanded target as state, which the stateless ONNX does not have.
+   - `last_action` keeps its current deploy meaning (raw output after `raw_clip`,
+     before the slew). Training must observe the same quantity.
+   - `q*_{t−1}` initialization at GetUp entry: the target the motors are actually
+     holding at entry (e.g. measured `q` clipped to the physical ranges when entering
+     from a passive/damping state). Simulation must initialize it the same way at the
+     end of its settle/unactuated phase.
+   - GetUp-state velocity fault at `|q̇| > 4 rad/s` (initial, tunable conservatively);
+     the existing `enable_velocity_limit`/`dq_max` check is global to all states and
+     would also constrain walking, so a state-local check (or state-switched config)
+     is needed.
+   - These go with the GetUp state of item 2 in one isolated change, after training
+     succeeds.

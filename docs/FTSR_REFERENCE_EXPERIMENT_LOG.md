@@ -40,3 +40,17 @@
   training and `deploy.yaml`.
 - 500 Hz sim PD vs 1 kHz-refreshed firmware PD recorded as an approximation needing
   sensitivity validation.
+
+## 2026-10-07: operational joint-speed contract added (user requirement; audits only)
+
+- New hardware/deployment contract for initial real get-up tests: 50 Hz policy,
+  `q_target` slew 3 rad/s = 0.06 rad/step relative to the previous commanded target,
+  applied after raw clip → absolute target → physical per-joint clip; measured q̇ never
+  clamped; soft q̇ envelope ≈ 3 rad/s (moderate penalty/monitor), emergency ≈ 4 rad/s.
+- Replaces the earlier "no slew limiter" conclusion. mini_pi_fsm has no slew limiter:
+  a GetUp-state runtime slew (with entry initialization and a state-local 4 rad/s
+  fault) is documented as required before real actuation; not implemented.
+- Motor no-load speed is separated from operational speed. Simulation must be evaluated
+  under H-conservative (ω₀ 7.85 rad/s) and H-loose (ω₀ 21 rad/s), both with τ_stall
+  21 Nm and τ_cap 16 Nm as hypotheses; neither is the verified motor speed;
+  H-conservative success is preferred.
