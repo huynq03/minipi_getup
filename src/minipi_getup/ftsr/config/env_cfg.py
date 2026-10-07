@@ -323,7 +323,7 @@ def _base_cfg(
     num_slots=1,
     track_air_time=True,
   )
-  twist = UniformVelocityCommandCfg(
+  twist = mdp.FtsrVelocityCommandCfg(
     entity_name="robot",
     resampling_time_range=(10.0, 10.0),
     rel_standing_envs=0.1,
