@@ -345,3 +345,14 @@ terms (on raw actions, so at 0.25 they're stricter per radian than on JiaRan at
   feasible.
 - Check (64 envs, random actions): actuator forcerange ±12.5, max target step
   0.1000 rad, max |τ| 12.6 Nm.
+- Evaluator bug found at it 1000: `evaluate.py` always built the faithful env
+  (9 Nm, no rate limit), so the first GetupGentle evaluations (600, 1000) ran the
+  policy in the wrong env. Fixed with `--env-task` (column `env_task`); the two
+  invalid rows were removed from results.csv. GetupSoft v1/v2 evaluations are
+  unaffected (they differ from the faithful env only in rewards and commands, and the
+  evaluator sets the commands itself).
+- Peak metrics now start after the settle hold (the reset drop alone gives torso
+  v_z ≈ 0.96 m/s). Re-check of faithful model_6000: unchanged (q̇ 16.9, v_z 1.37,
+  ω_xy 13.7; success 99.9 %).
+- Correct-env eval, no assist: it 600 and 1000 → 0 % (faithful was 0 % at 1000 as
+  well); peaks while trying q̇ 5.7–5.9 rad/s, ω_xy 3.9 rad/s.

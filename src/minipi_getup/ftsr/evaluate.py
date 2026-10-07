@@ -86,6 +86,7 @@ def _build(
   action_relative: bool | None = None,
   action_scale: float | None = None,
   assist_iteration: int | None = None,
+  env_task: str | None = None,
 ):
   import mjlab.tasks  # noqa: F401
   from mjlab.envs import ManagerBasedRlEnv
@@ -97,6 +98,9 @@ def _build(
   from minipi_getup.ftsr.rl import FtsrRunner
 
   task_id = "Mjlab-FTSR-MiniPi" if task == "recovery" else "Mjlab-FTSR-MiniPi-Walk"
+  # Variants that change the robot or the action term (torque envelope, rate limit)
+  # must be evaluated in their own env.
+  task_id = env_task or task_id
   cfg = load_env_cfg(task_id, play=True)
   cfg.scene.num_envs = num_envs
   cfg.seed = seed
@@ -202,7 +206,9 @@ def run_episode(env, wrapped, policy, seed: int, task: str, steps: int) -> dict:
     else:
       fell_after |= fallen & active
     max_h = torch.where(alive, torch.maximum(max_h, h), max_h)
-    rec = active & ~stood
+    # Peaks count from the end of the settle hold: the reset drop (~1 m/s torso v_z)
+    # isn't the policy's motion.
+    rec = active & ~stood & (k >= settle)
     qd_max = robot.data.joint_vel.abs().amax(dim=-1)
     vz = robot.data.root_link_lin_vel_w[:, 2].abs()
     wxy = robot.data.root_link_ang_vel_b[:, :2].norm(dim=-1)
@@ -398,6 +404,11 @@ def main() -> None:
   ap.add_argument("--seconds", type=float, default=None)
   ap.add_argument("--mode", choices=("student", "teacher"), default="student")
   ap.add_argument("--commands", choices=("mixed", "stand"), default="mixed")
+  ap.add_argument(
+    "--env-task",
+    default=None,
+    help="registered task whose play env to use (default: the faithful task)",
+  )
   ap.add_argument("--run-name", default="")
   ap.add_argument("--out", default="logs/ftsr_analysis/results.csv")
   ap.add_argument("--device", default="cuda:0")
@@ -424,6 +435,7 @@ def main() -> None:
     rel,
     args.action_scale,
     args.assist_iteration,
+    args.env_task,
   )
   steps = int(round(seconds / env.step_dt))
   os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
@@ -444,6 +456,7 @@ def main() -> None:
       "mode": args.mode,
       "seeds": " ".join(map(str, args.seeds)),
       "commands": args.commands,
+      "env_task": args.env_task or "",
       "episodes": args.envs * len(args.seeds),
       "assistance_force": 0.0 if args.assist_iteration is None else -1.0,
       "assist_iteration": args.assist_iteration,
