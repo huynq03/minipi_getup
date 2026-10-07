@@ -315,3 +315,41 @@ leave only 7 /m of pull at the current height, hence the smaller step.
 - v3 command when started: `uv run train Mjlab-FTSR-Ref-MiniPi-Recovery
   --env.scene.num-envs 4000 --agent.init-checkpoint /home/huy/minipi_getup/logs/rsl_rl/minipi_ftsr_ref_walk/2026-10-07_20-31-38_ftsr_ref_walk_v1_cont/model_900.pt
   --agent.run-name ftsr_ref_recovery_v3_monotonic_stage`.
+
+## 2026-10-08: v2 paused at 2150 for an assist-level diagnostic, resumed
+
+- r_s held from it 1472 to the pause at 2150 (no regression), S1 0.86-0.88, S2
+  0.37-0.58 (no trend), assist mean ~2 N, std 1.64 -> 2.23, reward 83 -> 70 (act_rate
+  -0.4 -> -1.4 /s with the std). qd > 3 5.7 %, > 4 0.5 %, slew 0.33. No NaN.
+- eval_2000 (no assist): 0 % success; more active than before (slew 0.26 vs 0.05,
+  qd > 3 3-13 %), max height p90 0.11-0.13 m, joint-limit margin min -0.133 rad.
+- Paused right after `model_2150.pt`. HEAD's Recovery task is monotonic (v3), so
+  `7c56ebe` registers `Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless` (v2 semantics,
+  otherwise identical) for evaluating / resuming v2.
+- Diagnostic, model_2150, deterministic student, Eq. 4 frozen at tc (Stateless task),
+  fraction of envs ending above h1 (all on feet, final height ~0.277-0.284 m):
+
+  | tc | supine | prone | left | right |
+  |---|---|---|---|---|
+  | 0.5 | 1.00 | 1.00 | 1.00 | 1.00 |
+  | 0.3 | 1.00 | 1.00 | 1.00 | 1.00 |
+  | 0.2 | 1.00 | 1.00 | 1.00 | 1.00 |
+  | 0.1 | 0.16 | 0.78 | 0.53 | 0.55 |
+  | 0.05 | 0.06 | 0.47 | 0.25 | 0.36 |
+  | 0.0 | 0.03 | 0.17 | 0.20 | 0.14 |
+  | none (play cfg) | 0.08 | 0.22 | 0.12 | 0.11 |
+
+  tc 0.2 = ~18 N on a lying robot (0.26 m g). Without any assistance model_2150 now
+  stands up in 8-22 % of episodes (upright, ~0.277 m, feet only), best from prone,
+  worst from supine; model_2000 did 0 %. No-assist dynamics are aggressive: qd > 3
+  12-14 %, > 4 1.2-1.9 %, tau max 16, slew 0.41, **joint-limit overshoot up to
+  0.222 rad** (left_side).
+- The eval `success` (h > 0.9 x 0.345 = 0.31 m, held 3 s) stays 0 because the r_s
+  target is h2 = 0.276 m: standing at the r_s target is below the success height.
+  Evaluation semantics unchanged; `frac_envs_final_above_h1` / `final_upright` are the
+  informative numbers until r_w.
+- Resumed: `uv run train Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless --env.scene.num-envs
+  4000 --agent.resume True --agent.load-run 2026-10-07_21-53-02_ftsr_ref_recovery_v2
+  --agent.load-checkpoint model_2150.pt --agent.max-iterations 5850 --agent.run-name
+  ftsr_ref_recovery_v2_r2150` (log `logs/ftsr_ref_recovery_v2_r2150.log`, run dir
+  `2026-10-08_00-21-57_ftsr_ref_recovery_v2_r2150`); tc continues 0.284 -> 0.272.
