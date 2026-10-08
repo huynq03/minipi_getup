@@ -6,6 +6,11 @@ implementation decision with its class (`SIMULATOR_PORT`, `ROBOT_ADAPTATION`,
 `UNRESOLVED`). Audits: `FTSR_REFERENCE_AUDIT_V2.md`, `MINIPI_PHYSICAL_MODEL_V2.md`,
 `MINIPI_DEPLOYMENT_CONTRACT_V2.md`.
 
+> **2026-10-08, experiment pd16_noslew (`FTSR_PD16_NOSLEW_EXPERIMENT.md`):** the
+> motor envelope and the target slew below were removed: the plant is now
+> `tau = clip(kp (q* - q) - kd qdot, +-16 Nm)` with no rate limit on q*, and the
+> `qd_soft_envelope` limit is 6.28 rad/s. The tables below describe v0-v2.
+
 ## Tasks
 
 | Task | Purpose |
