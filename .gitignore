@@ -23,3 +23,5 @@ scripts/
 .ruff_cache/
 .warp-cache-cu12/
 results/**/*.mp4
+results/host/host_ftsr_stage_v1/20261008_183136_920453/events.out.tfevents.1791459097.air3090.324632.0
+results/**/*.npz
