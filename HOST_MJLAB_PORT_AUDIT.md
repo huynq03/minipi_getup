@@ -129,3 +129,15 @@ All 12 checks pass:
 
 The constraint-buffer overflow seen at first (`nefc overflow`) was a port bug. It is
 fixed with `njmax = 1200` and `nconmax = 300`; no overflow appears in training logs.
+
+## 6. Post-training findings
+
+See `HOST_REPRODUCTION_REPORT.md`. Summary:
+
+- The trained policy stands on legs rotated 180° about the vertical axis (hip pitch and
+  roll at about ±172°, the URDF limits).
+- Collision and joint-limit softness are ruled out as causes. The remaining candidate is
+  the joint velocity limit: MuJoCo has none, and PhysX may enforce the URDF's 5 rad/s.
+  Replaying the final policy with a 5 rad/s cap drops its success from 100% to 25%.
+- `LeggedRobot_Pi(joint_vel_cap=..., limit_solref=...)` exposes both as diagnostics,
+  off by default.

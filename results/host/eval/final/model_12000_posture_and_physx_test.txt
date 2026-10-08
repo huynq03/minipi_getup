@@ -1,0 +1,19 @@
+env 0 (deg)        r_hip_pitch    r_hip_roll       r_thigh        r_calf r_ankle_pitch  r_ankle_roll   l_hip_pitch    l_hip_roll       l_thigh        l_calf l_ankle_pitch  l_ankle_roll
+start actuation (0.62s)                17            -0             1           -23            -8            -3            16             0            -1           -22            -8             3   base z 0.082 g_z -0.00
++0.2s                                -170           -96             2            92            78            -9           -96            45            70             1            75            -2   base z 0.079 g_z -0.99
++0.4s                                -172          -174           -65            93             2            -9          -157           176            -8            78           -32            10   base z 0.243 g_z -0.95
+first upright (+0.50s)               -172          -169           -65            32           -22            -9          -173           172           -19             0           -20             9   base z 0.324 g_z -1.00
+standing (+3.5s)                     -172          -172            11           -38            10            -9          -172           172           -12           -38            10             9   base z 0.351 g_z -0.99
+range swept during getup, all 64 envs (deg):
+  min          -184          -175           -94           -44           -31           -10          -175            -0           -25           -45           -33           -10
+  max            17            -0            12           100            78            -3            16           177            75           100            78            11
+  final mean (64 envs)    -172    -172      11     -38      10      -9    -172     172     -12     -38      10       9
+  URDF lower    -172    -172    -172     -37     -29      -9    -172     -29    -172     -37     -29      -9
+  URDF upper     172      29     172      95      74       9     172     172     172      95      74       9
+
+variant                      stand  flipped  max_overshoot_deg  peak_qd  min_hip_pitch_deg  max|hip_roll|_deg  t_stand
+baseline (v1 physics)         1.00     1.00               12.2     28.6               -184                177    0.52
+vel cap 5 rad/s               0.25     0.75                9.0      5.0               -174                174    1.18
+vel cap 10 rad/s              0.47     1.00                5.2     10.0               -176                176    0.68
+stiff limits solref 0.005     1.00     1.00                2.2     28.8               -173                173    0.54
+vel cap 5 + stiff limits      0.20     0.73                0.9      5.0               -173                173    1.14

@@ -89,13 +89,17 @@ def tolerance(x, bounds=(0.0, 0.0), margin=0.0, value_at_margin=0.1):
   return value
 
 
-def get_robot_cfg() -> EntityCfg:
+def get_robot_cfg(limit_solref: tuple[float, float] | None = None) -> EntityCfg:
   def spec_fn() -> mujoco.MjSpec:
     spec = mujoco.MjSpec.from_file(str(ASSET_XML))
     # Robot friction wins over the plane's (see GROUND_FRICTION_MEAN).
     for g in spec.geoms:
       if g.contype:
         g.priority = 1
+    if limit_solref is not None:  # diagnostic only; default keeps MuJoCo's (0.02, 1)
+      for j in spec.joints:
+        if j.type == mujoco.mjtJoint.mjJNT_HINGE:
+          j.solref_limit = list(limit_solref)
     return spec
 
   return EntityCfg(
@@ -125,8 +129,14 @@ class LeggedRobot_Pi:
     device: str,
     headless: bool = True,
     physics_substeps: int | None = None,
+    joint_vel_cap: float | None = None,
+    limit_solref: tuple[float, float] | None = None,
   ):
+    """``joint_vel_cap`` / ``limit_solref`` are diagnostics for the PhysX comparison
+    (``maxJointVelocity`` clamp, stiffer joint limits); both are off by default."""
     self.cfg = cfg
+    self.joint_vel_cap = joint_vel_cap
+    self.limit_solref = limit_solref
     self.physics_substeps = (
       PHYSICS_SUBSTEPS if physics_substeps is None else physics_substeps
     )
@@ -210,6 +220,11 @@ class LeggedRobot_Pi:
       # the external force held (see PHYSICS_SUBSTEPS).
       for _ in range(self.physics_substeps):
         self.sim.step()
+        if self.joint_vel_cap is not None:
+          qd = self.robot.data.joint_vel
+          self.robot.write_joint_velocity_to_sim(
+            qd.clamp(-self.joint_vel_cap, self.joint_vel_cap)
+          )
       self._refresh_dof_state_tensor()
 
       # vertical pulling force (world +Z, at the base_link COM)
@@ -420,7 +435,7 @@ class LeggedRobot_Pi:
         num_envs=self.num_envs,
         env_spacing=self.cfg.env.env_spacing,
         terrain=TerrainEntityCfg(terrain_type="plane"),
-        entities={"robot": get_robot_cfg()},
+        entities={"robot": get_robot_cfg(self.limit_solref)},
         extent=2.0,
       ),
       device=self.device,
