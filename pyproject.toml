@@ -52,6 +52,7 @@ dev = [
 host-train = "minipi_getup.host.train:main"
 host-play = "minipi_getup.host.play:main"
 host-eval = "minipi_getup.host.evaluate:main"
+host-play-viser = "minipi_getup.host.play_viser:main"
 
 [project.entry-points."mjlab.tasks"]
 minipi_getup = "minipi_getup"
