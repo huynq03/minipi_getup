@@ -81,3 +81,27 @@ Nothing here is hardware-verified; no checkpoint is labelled hardware-ready.
 ## Results
 
 (appended during the run)
+
+### Walk `ftsr_walk_pd16_noslew` (2026-10-08 22:59-23:50, 900 iterations, 3.2 s/it)
+
+Run `logs/rsl_rl/minipi_ftsr_ref_walk/2026-10-08_22-59-37_ftsr_walk_pd16_noslew`. No
+non-finite updates, KL 0.010-0.012, grad norm 3.6-7.7, std 1.0 -> 0.07 (converged), no
+falls in training after it ~150. Final rewards /s: height 4.90, lin_vel 6.80, yaw 3.16
+(still rising), qd > 6.28 rad/s 0.3 % of training samples.
+
+`eval_walk_900.json` (deterministic student, 16 envs per command, 10 s): **ACCEPTED**
+(corr_vx 1.000, fall rate 0 %).
+
+- vx: -0.34 -> -0.32, -0.15 -> -0.15, 0.15 -> 0.14, 0.30 -> 0.29, 0.54 -> 0.52 m/s.
+  Zero command: drift 3.6 cm, 0.14 touchdowns/s (stands still).
+- Turning while walking (vx 0.2, wz +-0.44): -0.54 / +0.45 rad/s (v0 walk: +-0.38).
+- Turning in place (vx 0, wz +-0.44): still none (-0.03 / 0.00 rad/s), as in v0.
+- Physical: qd p99 per joint 2.1-7.1 rad/s (left calf 7.1, ankle pitch 5.7-5.8), qd >
+  6.28 0.19 % of samples, torque max 16 Nm, near cap 0.08 %, > 6 Nm 6.6 % (v0 1.5 %),
+  joint-limit overshoot max 0.026 rad.
+
+### Recovery `ftsr_recovery_pd16_noslew` started 23:51 from that model_900
+
+Note: the walking init ends with std 0.07 (v0 walk init: 0.31 at recovery start), so
+recovery starts with little exploration; the entropy bonus (0.01, unchanged) is the
+only mechanism that raises it. Watched, not changed.
