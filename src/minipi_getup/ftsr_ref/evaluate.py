@@ -11,7 +11,7 @@ actuated). Reported per pose, never only in aggregate:
   mean / p95 / p99 / max per joint, fraction near the 16 Nm cap, fraction and
   longest run above the candidate rated torque (6 Nm), joint speed mean / p95 /
   p99 / max per joint, fractions above 3 and 4 rad/s, episodes containing > 4 rad/s,
-  target tracking error, slew saturation, mechanical power, base vertical speed, base
+  target tracking error, fraction above the 6.28 rad/s soft limit, mechanical power, base vertical speed, base
   roll/pitch rate, joint-limit margin, peak foot contact force.
 
 Walk (``--task ...-Walk``): fixed command grid (vx, wz) incl. zero, 10 s episodes;
@@ -20,7 +20,7 @@ touchdowns per second and air time (stepping), zero-command drift.
 
 Usage:
   python -m minipi_getup.ftsr_ref.evaluate --checkpoint RUN/model_N.pt \
-      --task Mjlab-FTSR-Ref-MiniPi-Recovery [--motor H-loose] [--out eval.json]
+      --task Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless [--out eval.json]
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import torch
 
 import minipi_getup  # noqa: F401
 from minipi_getup.ftsr_ref.config.env_cfg import COMMAND_RANGES, STAGE_HEIGHTS
-from minipi_getup.ftsr_ref.config.robot import JOINT_NAMES, MOTOR_HYPOTHESES
+from minipi_getup.ftsr_ref.config.robot import JOINT_NAMES, TAU_CAP, TAU_RATED_REPORT
 from minipi_getup.ftsr_ref.export import load_model
 from minipi_getup.ftsr_ref.mdp.resets import FALLEN_POSE_NAMES, POSE_KEY
 from minipi_getup.ftsr_ref.rl.modules import StudentPolicy
@@ -45,7 +45,7 @@ STAND_H = 0.9 * STAGE_HEIGHTS[2]
 STAND_UP = math.cos(math.radians(18.0))
 
 
-def build_env(task: str, n: int, motor: str, mutate=None, assist_tc=None):
+def build_env(task: str, n: int, mutate=None, assist_tc=None):
   """Play cfg (no noise, no assistance). ``assist_tc``: diagnostic only, re-enables
   the training Eq. 4 assistance frozen near that time coefficient (the env step
   counter is set to (1 - tc) t_tag; it drifts by < 0.02 over one episode)."""
@@ -54,7 +54,6 @@ def build_env(task: str, n: int, motor: str, mutate=None, assist_tc=None):
 
   cfg = copy.deepcopy(load_env_cfg(task, play=True))
   cfg.scene.num_envs = n
-  cfg.actions["joint_pos"].motor = copy.deepcopy(MOTOR_HYPOTHESES[motor])
   assert cfg.actions["joint_pos"].assist is None
   if assist_tc is not None:
     train_assist = load_env_cfg(task, play=False).actions["joint_pos"].assist
@@ -236,6 +235,7 @@ class Recorder:
       "tau_longest_above_rated_s": float(self.longest_rated[rows].max()),
       "qd_frac_above_3": float(qd_all[300:].sum()) / total,
       "qd_frac_above_4": float(qd_all[400:].sum()) / total,
+      "qd_frac_above_6p28": float(qd_all[628:].sum()) / total,
       "episodes_with_qd_above_4": float((self.ep_qd_max[rows] > 4.0).float().mean()),
       "tracking_err_mean": float(
         (self.err_sum[rows] / self.samples[rows].clamp(min=1)).mean()
@@ -309,7 +309,7 @@ def _support_summary(sup: torch.Tensor, h: torch.Tensor, last: int) -> dict:
 
 
 def evaluate_recovery(
-  model, task, motor, per_pose, policy_mode="student", assist_tc=None
+  model, task, per_pose, policy_mode="student", assist_tc=None
 ) -> dict:
   npose = len(FALLEN_POSE_NAMES)
   n = per_pose * npose
@@ -317,12 +317,11 @@ def evaluate_recovery(
   def mutate(cfg):
     cfg.events["reset_pose"].params["by_env_index"] = True
 
-  env = build_env(task, n, motor, mutate, assist_tc)
+  env = build_env(task, n, mutate, assist_tc)
   t = env.action_manager.get_term("joint_pos")
   pose = env.extras[POSE_KEY].clone()
   support = SupportTracker(env)
-  m = MOTOR_HYPOTHESES[motor]
-  rec = Recorder(env, pose, npose, m.tau_rated, m.tau_cap)
+  rec = Recorder(env, pose, npose, TAU_RATED_REPORT, TAU_CAP)
   _attach(env, rec)
   policy = StudentPolicy(model).to(DEV).eval()
   T = int(env.max_episode_length) - 1
@@ -366,7 +365,7 @@ def evaluate_recovery(
   monitor = t.monitor.summary(t.joint_names)
   out = {
     "task": task,
-    "motor": motor,
+    "plant": "PD16 (no envelope, no slew)",
     "policy": policy_mode,
     "assist_tc": assist_tc,
     "per_pose": {},
@@ -386,12 +385,12 @@ def evaluate_recovery(
       **rec.group_summary(g, rows),
     }
   out["success_min_pose"] = min(v["success"] for v in out["per_pose"].values())
-  out["slew_saturation_fraction"] = monitor.get("slew_saturation_fraction", 0.0)
+  out["qd_frac_above_soft"] = monitor.get("qd_frac_above_soft", 0.0)
   env.close()
   return out
 
 
-def evaluate_walk(model, task, motor, per_cmd=16, episode_s=10.0) -> dict:
+def evaluate_walk(model, task, per_cmd=16, episode_s=10.0) -> dict:
   vxs = (
     COMMAND_RANGES["lin_vel_x"][0],
     -0.15,
@@ -412,12 +411,11 @@ def evaluate_walk(model, task, motor, per_cmd=16, episode_s=10.0) -> dict:
     cfg.commands["twist"].resampling_time_range = (1e6, 1e6)
     cfg.episode_length_s = episode_s + 1.0
 
-  env = build_env(task, n, motor, mutate)
+  env = build_env(task, n, mutate)
   cmd_term = env.command_manager.get_term("twist")
   cmd = torch.tensor([grid[i // per_cmd] for i in range(n)], device=DEV)
-  m = MOTOR_HYPOTHESES[motor]
   rec = Recorder(
-    env, torch.zeros(n, dtype=torch.long, device=DEV), 1, m.tau_rated, m.tau_cap
+    env, torch.zeros(n, dtype=torch.long, device=DEV), 1, TAU_RATED_REPORT, TAU_CAP
   )
   _attach(env, rec)
   policy = StudentPolicy(model).to(DEV).eval()
@@ -484,7 +482,7 @@ def evaluate_walk(model, task, motor, per_cmd=16, episode_s=10.0) -> dict:
   corr_wz = float(torch.corrcoef(torch.stack((cmd[okm, 1], wz[okm])))[0, 1])
   out = {
     "task": task,
-    "motor": motor,
+    "plant": "PD16 (no envelope, no slew)",
     "rows": rows,
     "corr_vx": corr_vx,
     "corr_wz": corr_wz,
@@ -499,7 +497,6 @@ def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--checkpoint", required=True)
   ap.add_argument("--task", required=True)
-  ap.add_argument("--motor", default="H-conservative", choices=sorted(MOTOR_HYPOTHESES))
   ap.add_argument("--num-envs-per-pose", type=int, default=64)
   ap.add_argument("--policy", default="student", choices=("student", "teacher"))
   ap.add_argument("--out", default="")
@@ -512,12 +509,11 @@ def main() -> None:
   args = ap.parse_args()
   model = load_model(args.checkpoint).to(DEV)
   if args.task.endswith("Walk"):
-    out = evaluate_walk(model, args.task, args.motor)
+    out = evaluate_walk(model, args.task)
   else:
     out = evaluate_recovery(
       model,
       args.task,
-      args.motor,
       args.num_envs_per_pose,
       args.policy,
       args.assist_tc,

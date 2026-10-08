@@ -50,6 +50,8 @@ class FtsrRunnerCfg(RslRlBaseRunnerCfg):
 
   # Periodic no-assist evaluation (separate process), every eval_every iterations.
   eval_every: int = 0
+  eval_at: tuple[int, ...] = ()
+  """Explicit evaluation iterations; after the last one, every ``eval_every``."""
   eval_task: str = ""
   eval_envs_per_pose: int = 64
 
@@ -64,7 +66,8 @@ def recovery_runner_cfg() -> FtsrRunnerCfg:
     clip_actions=None,  # raw clip lives in the action term (deploy order)
     seed=42,
     eval_every=500,
-    eval_task="Mjlab-FTSR-Ref-MiniPi-Recovery",
+    eval_at=(500, 1000, 1500, 2000, 2500, 2750, 3000, 3500),
+    eval_task="Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless",
   )
 
 
@@ -74,5 +77,6 @@ def walk_runner_cfg() -> FtsrRunnerCfg:
   cfg.max_iterations = 400
   cfg.save_interval = 25
   cfg.eval_every = 0
+  cfg.eval_at = ()
   cfg.eval_task = ""
   return cfg

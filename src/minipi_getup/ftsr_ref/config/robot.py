@@ -1,33 +1,20 @@
-"""Mini-Pi plant for the FTSR reference port (docs/MINIPI_PHYSICAL_MODEL_V2.md).
-
-Everything here is a Mini-Pi invariant or an explicitly labelled hypothesis:
+"""Mini-Pi plant for the FTSR reference port (experiment pd16_noslew).
 
 - Model: the unchanged ``cl_pai.xml`` (6.94 kg, vendor-URDF joint ranges, armature 0).
 - PD gains: the deployed RL gains of the vendor controller and every mini_pi_fsm RL
-  package (``HARDWARE_CONSTRAINT``). The 0.7 kp factor of the old get-up task was a
-  simulation-only choice and is dropped.
-- Actuator: MuJoCo's native ``<position>`` actuator (implicit in kd, stable at 2 ms
-  without armature), i.e. the motor firmware law ``tau = kp (q* - q) - kd qdot``,
-  force-limited at tau_cap. Every physics step the action term selects the active
-  piece of the motor envelope below and writes it as the actuator's affine law
-  (``mdp/actions.py``), keeping the velocity slope implicit. No armature is added
-  (the vendor URDF has none; the reflected rotor inertia of the installed motor is
-  unknown, see docs/MINIPI_PHYSICAL_MODEL_V2.md).
-- Motor envelope: a linear four-quadrant DC curve, the same law as mjlab's
-  ``dc_motor_clip``::
+  package (``HARDWARE_CONSTRAINT``).
+- Actuator: MuJoCo's native ``<position>`` actuator, i.e. the motor firmware law
 
-      tau_max(qd) = clamp(tau_stall (1 - qd / omega0), max=tau_cap)
-      tau_min(qd) = clamp(tau_stall (-1 - qd / omega0), min=-tau_cap)
+      tau = clip(kp (q* - q) - kd qdot, -TAU_CAP, TAU_CAP),   TAU_CAP = 16 Nm
 
-  Motoring torque falls to zero at the no-load speed; braking torque is only capped.
-  The installed HTDW-5047-36-NE envelope is unknown, so two hypotheses are defined;
-  neither is a verified motor specification.
+  The clip is MuJoCo's actuator ``forcerange`` (``effort_limit``). kd is integrated
+  implicitly (implicitfast). There is no torque-speed derating: the earlier
+  H-conservative / H-loose envelope hypotheses were removed in this experiment
+  (user decision 2026-10-08). The passive state (kp 0, kd 1) is written by the
+  action term (``mdp/actions.py``). No armature is added.
 """
 
 from __future__ import annotations
-
-import math
-from dataclasses import dataclass
 
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
@@ -102,41 +89,24 @@ REF_STANCE = 0.75
 LENGTH_RATIO = STANCE_HEIGHT / REF_STANCE  # 0.46
 
 ##
-# Motor envelope hypotheses (docs/MINIPI_PHYSICAL_MODEL_V2.md, Sec. 4b).
+# Torque limits.
 ##
 
-
-@dataclass
-class MotorEnvelopeCfg:
-  """Linear four-quadrant torque-speed envelope at the joint (see module doc)."""
-
-  name: str = "H-conservative"
-  omega0: float = 75.0 * 2.0 * math.pi / 60.0  # rad/s, no-load speed (7.85)
-  tau_stall: float = 21.0  # Nm
-  tau_cap: float = 16.0  # Nm, never exceeded
-  tau_rated: float = 6.0  # Nm, monitored only (time above rated)
-
-
-# Nominal provisional training plant (user decision 2026-10-07). User-supplied
-# HTDW-5036-02 summary: no-load 75 rpm, stall 21 Nm; 16 Nm = product-page robot max.
-H_CONSERVATIVE = MotorEnvelopeCfg()
-# Sensitivity / evaluation plant only: no-load speed = vendor URDF velocity limit.
-H_LOOSE = MotorEnvelopeCfg(name="H-loose", omega0=21.0)
-MOTOR_HYPOTHESES = {m.name: m for m in (H_CONSERVATIVE, H_LOOSE)}
+TAU_CAP = 16.0  # Nm, hard actuator force limit (MuJoCo forcerange)
+TAU_RATED_REPORT = 6.0  # Nm, reporting threshold only (time above), not enforced
 
 
 def get_robot_cfg() -> EntityCfg:
   """Mini-Pi with the deployed PD gains on native position actuators.
 
-  ``effort_limit`` = tau_cap makes the actuators force-limited; the action term then
-  narrows ``forcerange`` to the motor envelope at every physics step.
+  ``effort_limit`` = TAU_CAP sets the static actuator ``forcerange`` (+-16 Nm).
   """
   actuators = tuple(
     BuiltinPositionActuatorCfg(
       target_names_expr=(f".*_{joint}_joint",),
       stiffness=KP[joint],
       damping=KD[joint],
-      effort_limit=H_CONSERVATIVE.tau_cap,
+      effort_limit=TAU_CAP,
     )
     for joint in KP
   )

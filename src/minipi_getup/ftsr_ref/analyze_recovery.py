@@ -11,6 +11,12 @@ Step 1, one process per mode (same env seed -> identical initial conditions):
 
 Step 2: ``report --out DIR`` writes plots, videos and summary.md from the runs.
 
+Training-time evaluation (spawned by the runner): ``periodic --checkpoint CKPT
+--iteration N --run-dir RUN`` runs ``det`` without storing qpos, writes
+``RUN/eval/eval_N.json`` and updates ``RUN/best_recovery.json`` /
+``RUN/best_recovery_model.pt`` (ranked by mean deterministic no-assist recovery over
+the four poses, then by the worst pose).
+
 Same rollout as evaluate.py (play cfg, poses by env index, 2 s passive + 18 s policy).
 """
 
@@ -25,7 +31,7 @@ import torch
 
 import minipi_getup  # noqa: F401
 from minipi_getup.ftsr_ref.config.env_cfg import STAGE_HEIGHTS
-from minipi_getup.ftsr_ref.config.robot import MOTOR_HYPOTHESES
+from minipi_getup.ftsr_ref.config.robot import TAU_CAP, TAU_RATED_REPORT
 from minipi_getup.ftsr_ref.evaluate import (
   DEV,
   STAND_UP,
@@ -57,11 +63,10 @@ def run(args) -> None:
 
   torch.manual_seed(args.seed)
   tc = args.tc if args.mode == "assist" else None
-  env = build_env(TASK, n, "H-conservative", mutate, tc)
+  env = build_env(TASK, n, mutate, tc)
   t = env.action_manager.get_term("joint_pos")
   pose = env.extras[POSE_KEY].clone()
-  m = MOTOR_HYPOTHESES["H-conservative"]
-  rec = Recorder(env, pose, npose, m.tau_rated, m.tau_cap)
+  rec = Recorder(env, pose, npose, TAU_RATED_REPORT, TAU_CAP)
   _attach(env, rec)
   support = SupportTracker(env)
   policy = StudentPolicy(model).to(DEV).eval()
@@ -73,7 +78,8 @@ def run(args) -> None:
   up = torch.zeros(n, T, device=DEV)
   sup = torch.zeros(n, T, len(SUPPORT_GROUPS), dtype=torch.bool, device=DEV)
   fz = torch.zeros(n, T, device=DEV)
-  qpos = torch.zeros(n, T, env.sim.data.qpos.shape[1], device=DEV)
+  keep_qpos = not getattr(args, "no_qpos", False)
+  qpos = torch.zeros(n, T if keep_qpos else 1, env.sim.data.qpos.shape[1], device=DEV)
   stage_log = []
   st = env.extras["ftsr_stage"]
   t.monitor.clear()
@@ -91,7 +97,8 @@ def run(args) -> None:
       f = getattr(t, "force", None) if t.cfg.assist is not None else None
       if f is not None:
         fz[:, k] = f[:, 2]
-      qpos[:, k] = env.sim.data.qpos
+      if keep_qpos:
+        qpos[:, k] = env.sim.data.qpos
       stage_log.append((st.stage, st.h_cmd))
   phys = {
     name: rec.group_summary(g, pose == g) for g, name in enumerate(FALLEN_POSE_NAMES)
@@ -123,8 +130,8 @@ def run(args) -> None:
     "seed": args.seed,
     "per_pose": args.per_pose,
     "policy_std": std.cpu().tolist(),
-    "slew_saturation_fraction": t.monitor.summary(t.joint_names).get(
-      "slew_saturation_fraction", 0.0
+    "qd_frac_above_soft": t.monitor.summary(t.joint_names).get(
+      "qd_frac_above_soft", 0.0
     ),
     "physics": phys,
   }
@@ -299,7 +306,7 @@ def report(args) -> None:
   w(
     "| mode | pose | qd max | qd p95 (worst joint) | qd p99 (worst joint) | "
     "qd>3 | qd>4 | tau max | near cap (>=15.2 Nm) | >6 Nm | limit overshoot max | "
-    "episodes overshoot >0.05 rad | slew sat |"
+    "episodes overshoot >0.05 rad | qd>6.28 |"
   )
   w("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
   for m in modes:
@@ -313,7 +320,7 @@ def report(args) -> None:
         f"{100 * s['qd_frac_above_3']:.1f}% | {100 * s['qd_frac_above_4']:.2f}% | "
         f"{max(s['tau_max'].values()):.1f} | {100 * s['tau_frac_near_cap']:.2f}% | "
         f"{100 * s['tau_frac_above_rated']:.1f}% | {ov.max():.3f} | "
-        f"{pct(ov > 0.05)} | {M[m]['slew_saturation_fraction']:.2f} |"
+        f"{pct(ov > 0.05)} | {100 * M[m]['qd_frac_above_soft']:.2f}% |"
       )
   w("")
 
@@ -472,10 +479,87 @@ def report(args) -> None:
 
 def _scene_model():
   """Host-side MuJoCo model of the scene (one robot + ground) for rendering."""
-  env = build_env(TASK, 4, "H-conservative")
+  env = build_env(TASK, 4)
   m = env.sim.mj_model
   env.close()
   return m
+
+
+def periodic(args) -> None:
+  import shutil
+
+  out = os.path.join(args.run_dir, "eval", f"it{args.iteration}")
+  args.out, args.mode, args.no_qpos = out, "det", True
+  args.seed, args.tc = 2150, 0.2
+  run(args)
+  z = np.load(os.path.join(out, "det.npz"), allow_pickle=True)
+  meta = json.load(open(os.path.join(out, "det_meta.json")))
+  a = analyze(z)
+  res = {"iteration": args.iteration, "checkpoint": os.path.abspath(args.checkpoint)}
+  res["policy_std_mean"] = float(np.mean(meta["policy_std"]))
+  per = {}
+  for g, name in enumerate(FALLEN_POSE_NAMES):
+    r = z["pose"] == g
+    s = meta["physics"][name]
+    r1 = a["cross"]["h1"]["reached"][r]
+    r2 = a["cross"]["h2"]["reached"][r]
+    tr = a["t_rec"][r & a["recovered"]]
+    ov = z["limit_overshoot"][r]
+    per[name] = {
+      "recovered": float(a["recovered"][r].mean()),
+      "strict_0p31": float(a["strict"][r].mean()),
+      "foot_only_stable": float((a["recovered"] & a["final_feet_only"])[r].mean()),
+      "reach_h1": float(r1.mean()),
+      "h2_given_h1": float(r2[r1].mean()) if r1.any() else 0.0,
+      "recover_time_median_s": float(np.median(tr)) if tr.size else None,
+      "qd_p95": max(s["qd_p95"].values()),
+      "qd_p99": max(s["qd_p99"].values()),
+      "qd_max": max(s["qd_max"].values()),
+      "qd_frac_above_6p28": s["qd_frac_above_6p28"],
+      "tau_max": max(s["tau_max"].values()),
+      "tau_frac_near_cap": s["tau_frac_near_cap"],
+      "limit_overshoot_max": float(ov.max()),
+      "episodes_overshoot_gt_0p05": float((ov > 0.05).mean()),
+      "categories": {
+        c: float((a["cat"][r] == c).mean()) for c in sorted(set(a["cat"].tolist()))
+      },
+    }
+  res["per_pose"] = per
+  rec = [v["recovered"] for v in per.values()]
+  res["recovered_mean"] = float(np.mean(rec))
+  res["recovered_min_pose"] = float(np.min(rec))
+  with open(
+    os.path.join(args.run_dir, "eval", f"eval_{args.iteration}.json"), "w"
+  ) as f:
+    json.dump(res, f, indent=1)
+  os.remove(os.path.join(out, "det.npz"))  # large; the json keeps the metrics
+  line = " ".join(
+    f"{k[:5]} {100 * v['recovered']:.0f}%(h1 {100 * v['reach_h1']:.0f} "
+    f"h2|h1 {100 * v['h2_given_h1']:.0f})"
+    for k, v in per.items()
+  )
+  print(
+    f"[eval {args.iteration}] recovered mean {100 * res['recovered_mean']:.1f}% | {line}"
+  )
+  best_path = os.path.join(args.run_dir, "best_recovery.json")
+  best = json.load(open(best_path)) if os.path.exists(best_path) else None
+  key = (res["recovered_mean"], res["recovered_min_pose"])
+  if best is None or key > (best["recovered_mean"], best["recovered_min_pose"]):
+    shutil.copy(args.checkpoint, os.path.join(args.run_dir, "best_recovery_model.pt"))
+    with open(best_path, "w") as f:
+      json.dump(
+        {
+          "iteration": args.iteration,
+          "recovered_mean": res["recovered_mean"],
+          "recovered_min_pose": res["recovered_min_pose"],
+          "checkpoint": res["checkpoint"],
+          "note": "ranked by autonomous (no-assist) recovery only; physical safety "
+          "reported separately in eval_N.json; not hardware-verified",
+        },
+        f,
+        indent=1,
+      )
+    print(f"[eval {args.iteration}] new best_recovery_model.pt", flush=True)
 
 
 def main() -> None:
@@ -488,11 +572,16 @@ def main() -> None:
   r.add_argument("--per-pose", type=int, default=128)
   r.add_argument("--seed", type=int, default=2150)
   r.add_argument("--tc", type=float, default=0.2)
+  q = sub.add_parser("periodic")
+  q.add_argument("--checkpoint", required=True)
+  q.add_argument("--iteration", type=int, required=True)
+  q.add_argument("--run-dir", required=True)
+  q.add_argument("--per-pose", type=int, default=64)
   p = sub.add_parser("report")
   p.add_argument("--out", required=True)
   p.add_argument("--no-video", action="store_true")
   args = ap.parse_args()
-  run(args) if args.cmd == "run" else report(args)
+  {"run": run, "periodic": periodic, "report": report}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Visual demo of a recovery checkpoint (simulation only, evaluation tooling).
+"""Visual demo of a recovery checkpoint (simulation only, evaluation tooling; plant PD16, no slew).
 
 Runs the same deterministic student rollout as ``evaluate.py`` (play cfg: no noise,
 poses by env index, 2 s passive + 18 s actuated), once without assistance and once
@@ -62,7 +62,7 @@ def rollout(model, per_pose: int, seed: int, tc: float | None) -> dict:
     cfg.seed = seed
 
   torch.manual_seed(seed)
-  env = build_env(TASK, n, "H-conservative", mutate, tc)
+  env = build_env(TASK, n, mutate, tc)
   t = env.action_manager.get_term("joint_pos")
   pose = env.extras[POSE_KEY].cpu().numpy()
   support = SupportTracker(env)

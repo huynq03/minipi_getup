@@ -5,9 +5,9 @@ float32 output ``actions`` [1, 12] = raw action (before raw clip). The actor's o
 the newest frame, sliced inside the graph, so mini_pi_fsm needs a single observation
 group with ``history_length: 5``, ``use_gym_history: true``, ``history_init: zero``.
 
-The runtime action path (raw clip -> scale/offset -> per-joint clip -> 0.06 rad slew)
-is NOT in the graph: the slew needs the previous commanded target as state. It is
-written to ``deploy_contract.json`` for the (not yet implemented) GetUp state.
+The runtime action path (raw clip -> scale/offset -> per-joint clip -> PD, torque
+clipped at +-16 Nm; experiment pd16_noslew has no target slew) is NOT in the graph.
+It is written to ``deploy_contract.json`` for the (not yet implemented) GetUp state.
 
 Usage (artifact):
   python -m minipi_getup.ftsr_ref.export --checkpoint RUN/model_N.pt --out DIR
@@ -85,7 +85,6 @@ def deploy_contract() -> dict:
     ACTION_SCALE,
     PASSIVE_STEPS,
     RAW_CLIP,
-    SLEW_RATE,
   )
   from minipi_getup.ftsr_ref.config.robot import (
     JOINT_NAMES,
@@ -93,6 +92,7 @@ def deploy_contract() -> dict:
     KD,
     KP,
     PASSIVE_KD,
+    TAU_CAP,
   )
 
   def per_joint(table):
@@ -130,9 +130,11 @@ def deploy_contract() -> dict:
       "scale": per_joint(ACTION_SCALE),
       "offset": [0.0] * len(JOINT_NAMES),
       "clip": [list(JOINT_RANGES[n]) for n in JOINT_NAMES],
-      "slew_rad_per_step": SLEW_RATE * 0.02,
-      "slew_init": "measured q clipped to clip, at GetUp entry",
-      "order": "raw_clip -> scale/offset -> clip -> slew -> motor PD",
+      "slew_rad_per_step": None,
+      "torque_limit_nm": TAU_CAP,
+      "order": "raw_clip -> scale/offset -> clip -> PD (torque clipped +-16 Nm)",
+      "note": "trained without a target slew (pd16_noslew); deploying it with a "
+      "slew changes the plant",
     },
     "entry": {
       "passive_before_policy_s": PASSIVE_STEPS * 0.02,

@@ -18,7 +18,7 @@ o_t (48), release order and scales (``compute_observations_without_noise``):
     [9:12)  command (vx, vy, wz) * (2, 2, 0.25)
     [12:24) q - q_default
     [24:36) qdot * 0.05
-    [36:48) last action (raw-clipped, before slew)
+    [36:48) last action (raw-clipped)
 
 Noise (uniform, observation units, release ``noise_scales`` x ``obs_scales``): gyro
 0.05 x 0.25, gravity 0.05, q 0.04, qdot 0.06 x 0.05; none on command / action.

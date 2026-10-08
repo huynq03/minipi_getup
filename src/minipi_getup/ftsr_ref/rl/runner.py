@@ -25,6 +25,7 @@ is stateless (recomputed from the population).
 
 from __future__ import annotations
 
+import json
 import os
 import statistics
 import subprocess
@@ -272,11 +273,40 @@ class FtsrRunner:
     if self.writer is not None:
       self.writer.flush()
 
+  # Non-finite guard (diagnostics only; the objective is unchanged while values are
+  # finite): a minibatch whose loss or gradient norm is non-finite is skipped (no
+  # optimizer step) and its inputs are dumped once per iteration. Persistent failures
+  # stop training: more than half of an iteration's minibatches skipped, or skips in
+  # ``nan_max_consecutive`` consecutive iterations.
+  nan_max_consecutive = 3
+
+  def _nonfinite_report(self, it_tag: str, tensors: dict[str, torch.Tensor]) -> None:
+    rep = {}
+    for k, v in tensors.items():
+      v = v.detach()
+      bad = ~torch.isfinite(v)
+      fin = v[~bad]
+      rep[k] = {
+        "nonfinite": int(bad.sum()),
+        "numel": v.numel(),
+        "absmax_finite": float(fin.abs().max()) if fin.numel() else None,
+      }
+    rep["params_nonfinite"] = {
+      n: int((~torch.isfinite(p)).sum())
+      for n, p in self.model.named_parameters()
+      if not torch.isfinite(p).all()
+    }
+    print(f"[FTSR-Ref] NON-FINITE in {it_tag}: {json.dumps(rep)}", flush=True)
+    if self.log_dir is not None:
+      with open(os.path.join(self.log_dir, f"nonfinite_{it_tag}.json"), "w") as f:
+        json.dump(rep, f, indent=1)
+
   def _update(self) -> dict[str, float]:
     cfg = self.cfg
     clip = cfg["clip_param"]
     stats: dict[str, float | torch.Tensor] = defaultdict(float)
     n = 0
+    skipped, total_mb, reported = 0, 0, False
     for mb in self.storage.minibatches(
       cfg["num_mini_batches"], cfg["num_learning_epochs"], self.teacher_mask
     ):
@@ -325,8 +355,39 @@ class FtsrRunner:
         - cfg["entropy_coef"] * (entropy)
       )
       self.optimizer.zero_grad()
-      loss.backward()
-      grad = nn.utils.clip_grad_norm_(m.ppo_parameters(), cfg["max_grad_norm"])
+      total_mb += 1
+      ok = bool(torch.isfinite(loss))
+      if ok:
+        loss.backward()
+        grad = nn.utils.clip_grad_norm_(m.ppo_parameters(), cfg["max_grad_norm"])
+        ok = bool(torch.isfinite(grad))
+      if not ok:
+        self.optimizer.zero_grad()
+        skipped += 1
+        if not reported:
+          reported = True
+          self._nonfinite_report(
+            f"ppo_it{self.current_learning_iteration}",
+            {
+              "loss": loss,
+              "surrogate": surrogate,
+              "value_loss": value_loss,
+              "mean": mean,
+              "std": m.std,
+              "log_prob": log_prob,
+              "old_log_prob": mb["log_prob"],
+              "ratio": ratio,
+              "advantages": adv,
+              "returns": mb["returns"],
+              "values": mb["values"],
+              "value": value,
+              "actions": mb["actions"],
+              "obs_actor": mb["obs_actor"],
+              "obs_critic": mb["obs_critic"],
+              "obs_teacher": mb["obs_teacher"],
+            },
+          )
+        continue
       self.optimizer.step()
       with torch.no_grad():  # device accumulators, read once after the update
         stats["surrogate"] += surrogate.detach()
@@ -335,11 +396,36 @@ class FtsrRunner:
         stats["grad_norm"] += grad.detach()
         stats["clip_frac"] += ((ratio - 1.0).abs() > clip).float().mean()
       n += 1
-    return {k: float(v) / n for k, v in stats.items()}
+    self._guard(skipped, total_mb, "ppo")
+    out = {k: float(v) / max(n, 1) for k, v in stats.items()}
+    out["skipped_minibatches"] = float(skipped)
+    return out
+
+  def _guard(self, skipped: int, total: int, what: str) -> None:
+    """Stop on persistent numerical failure; parameters must stay finite."""
+    bad_params = [
+      n for n, p in self.model.named_parameters() if not torch.isfinite(p).all()
+    ]
+    if bad_params:
+      raise RuntimeError(f"non-finite parameters after the {what} update: {bad_params}")
+    key = f"_consec_{what}"
+    streak = getattr(self, key, 0) + 1 if skipped else 0
+    setattr(self, key, streak)
+    if skipped:
+      print(
+        f"[FTSR-Ref] {what}: skipped {skipped}/{total} non-finite minibatches "
+        f"(streak {streak})",
+        flush=True,
+      )
+    if skipped > total // 2 or streak >= self.nan_max_consecutive:
+      raise RuntimeError(
+        f"persistent non-finite {what} updates ({skipped}/{total} minibatches, "
+        f"{streak} consecutive iterations): stopping; last checkpoint is intact"
+      )
 
   def _update_student(self) -> dict[str, float]:
     cfg = self.cfg
-    total, n = 0.0, 0
+    total, n, count, skipped = 0.0, 0, 0, 0
     for mb in self.storage.minibatches(
       cfg["student_num_mini_batches"],
       cfg["student_num_learning_epochs"],
@@ -350,36 +436,59 @@ class FtsrRunner:
       pred = self.model.student_encoder(mb["obs_policy"])
       loss = ((pred - target) ** 2).mean()
       self.student_optimizer.zero_grad()
-      loss.backward()
-      nn.utils.clip_grad_norm_(
-        self.model.student_encoder.parameters(), cfg["student_max_grad_norm"]
-      )
+      count += 1
+      ok = bool(torch.isfinite(loss))
+      if ok:
+        loss.backward()
+        g = nn.utils.clip_grad_norm_(
+          self.model.student_encoder.parameters(), cfg["student_max_grad_norm"]
+        )
+        ok = bool(torch.isfinite(g))
+      if not ok:
+        self.student_optimizer.zero_grad()
+        skipped += 1
+        if skipped == 1:
+          self._nonfinite_report(
+            f"student_it{self.current_learning_iteration}",
+            {"loss": loss, "pred": pred, "target": target, "obs": mb["obs_policy"]},
+          )
+        continue
       self.student_optimizer.step()
       total += loss.detach()
       n += 1
-    return {"student_mse": float(total) / n}
+    self._guard(skipped, count, "student")
+    return {"student_mse": float(total) / max(n, 1)}
 
   # ---------------------------------------------------------------------------
   # Periodic no-assist evaluation (separate process, does not block training).
 
   def _is_eval_iteration(self, it: int) -> bool:
+    if not self.cfg.get("eval_task", ""):
+      return False
+    at = tuple(self.cfg.get("eval_at", ()) or ())
     every = self.cfg.get("eval_every", 0)
-    return bool(every) and it % every == 0 and self.cfg.get("eval_task", "")
+    if it in at:
+      return True
+    return bool(every) and it % every == 0 and (not at or it > max(at))
 
   def _spawn_eval(self, ckpt: str, it: int) -> None:
     out_dir = os.path.join(self.log_dir or ".", "eval")
     os.makedirs(out_dir, exist_ok=True)
+    # Deterministic student, zero assistance, fixed seed and reset conditions
+    # (analyze_recovery: recovery, h1 -> h2, foot-only, strict, time, qd / torque /
+    # joint-limit statistics); also tracks the best checkpoint by autonomous recovery.
     cmd = [
       sys.executable,
       "-m",
-      "minipi_getup.ftsr_ref.evaluate",
+      "minipi_getup.ftsr_ref.analyze_recovery",
+      "periodic",
       "--checkpoint",
       ckpt,
-      "--task",
-      self.cfg["eval_task"],
-      "--out",
-      os.path.join(out_dir, f"eval_{it}.json"),
-      "--num-envs-per-pose",
+      "--iteration",
+      str(it),
+      "--run-dir",
+      self.log_dir or ".",
+      "--per-pose",
       str(self.cfg.get("eval_envs_per_pose", 64)),
     ]
     log = open(os.path.join(out_dir, f"eval_{it}.log"), "w")
@@ -416,8 +525,8 @@ class FtsrRunner:
       f"tc {g('Assist/time_coeff', 0):.3f} | tau mean {safety.get('tau_mean', 0):.2f} "
       f"max {safety.get('tau_max', 0):.1f} | qd mean {safety.get('qd_mean', 0):.2f} "
       f"max {safety.get('qd_max', 0):.1f} >3 {safety.get('qd_frac_above_3', 0):.3f} >4 "
-      f"{safety.get('qd_frac_above_4', 0):.3f} | slew "
-      f"{safety.get('slew_saturation_fraction', 0):.2f} | mse "
+      f"{safety.get('qd_frac_above_4', 0):.3f} >6.28 "
+      f"{safety.get('qd_frac_above_soft', 0):.4f} | mse "
       f"{loss_info.get('student_mse', 0):.4f} std "
       f"{scalars['Policy/mean_noise_std']:.2f} ({tc:.1f}+{tl:.1f}s)",
       flush=True,

@@ -58,23 +58,18 @@ from mjlab.viewer import ViewerConfig
 from minipi_getup.ftsr_ref import mdp
 from minipi_getup.ftsr_ref.config.rewards import FEET_SENSOR, REWARD_TABLE
 from minipi_getup.ftsr_ref.config.robot import (
-  H_CONSERVATIVE,
   LENGTH_RATIO,
   MINIPI_MASS,
   REF_MASS,
   STANCE_HEIGHT,
-  MotorEnvelopeCfg,
   get_robot_cfg,
 )
 
 STEPS_PER_ITERATION = 24
-# Physics 0.5 ms x 40 = 20 ms policy step (SIMULATOR_PORT / HARDWARE_CONSTRAINT).
-# The vendor model has no armature (ankle-roll joint inertia 4.4e-4 kg m^2). With the
-# motor envelope, 2 ms physics lets the light joints exceed the no-load speed by far
-# (floating single-joint test, slew off: ankle roll 71, ankle pitch 18, hip yaw 13
-# rad/s against omega0 = 7.85); at 0.5 ms they saturate at 7.9 (ankle roll 9.2 on a
-# raw target jump). Halving the step twice invents no physical parameter, as
-# mini_pi_fsm's own simulator does (scene_mini_pi.xml: 0.5 ms for the same reason).
+# Physics 0.5 ms x 40 = 20 ms policy step (kept from v2; mini_pi_fsm's own simulator
+# also runs 0.5 ms). The vendor model has no armature (ankle-roll joint inertia
+# 4.4e-4 kg m^2); the small step keeps the light joints well resolved under the plain
+# 16 Nm PD (experiment pd16_noslew: no torque-speed envelope, no target slew).
 PHYSICS_DT = 0.0005
 DECIMATION = 40
 EPISODE_LENGTH_S = 20.0
@@ -95,7 +90,9 @@ ACTION_SCALE = {
   r".*_ankle_roll_joint": 0.25,
 }
 RAW_CLIP = 50.0
-SLEW_RATE = 3.0  # rad/s on q_target (operational contract): 0.06 rad per step
+# Soft joint-speed envelope (reward ``qd_soft_envelope`` and monitoring), rad/s.
+# pd16_noslew: 6.28 (was 3.0 with the slew contract). Not a clamp.
+QD_SOFT_LIMIT = 6.28
 
 ASSIST_F_MAX = 400.0 / REF_MASS * MINIPI_MASS  # 100.3 N = 1.474 m g
 ASSIST_MU = -math.log(1.0 - 0.65 / 0.75) / (STAGE_HEIGHTS[0] - 0.085)
@@ -188,8 +185,7 @@ def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
       "joint_pos": mdp.FtsrActionCfg(
         scale=dict(ACTION_SCALE),
         raw_clip=RAW_CLIP,
-        slew_rate=SLEW_RATE,
-        motor=MotorEnvelopeCfg(**vars(H_CONSERVATIVE)),
+        qd_soft=QD_SOFT_LIMIT,
       )
     },
     commands={"twist": twist},

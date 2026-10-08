@@ -31,17 +31,15 @@ from minipi_getup.ftsr_ref.config.env_cfg import (
   STAGE_REWARD_HEIGHTS,
 )
 from minipi_getup.ftsr_ref.config.robot import (
-  H_CONSERVATIVE,
-  H_LOOSE,
   JOINT_NAMES,
   JOINT_RANGES,
   KD,
   KP,
   MINIPI_MASS,
   MINIPI_WEIGHT,
-  MotorEnvelopeCfg,
+  TAU_CAP,
 )
-from minipi_getup.ftsr_ref.mdp.actions import COST_KEY, motor_envelope
+from minipi_getup.ftsr_ref.mdp.actions import COST_KEY
 from minipi_getup.ftsr_ref.mdp.assistance import time_coeff, uprighting_rotvec
 from minipi_getup.ftsr_ref.mdp.stages import StageCfg, decide_stage
 from minipi_getup.ftsr_ref.rl.storage import (
@@ -54,6 +52,8 @@ from minipi_getup.ftsr_ref.rl.storage import (
 DEV = "cuda:0" if torch.cuda.is_available() else "cpu"
 WALK = "Mjlab-FTSR-Ref-MiniPi-Walk"
 REC = "Mjlab-FTSR-Ref-MiniPi-Recovery"
+REC_STATELESS = "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless"
+OLD_OMEGA0 = 75.0 * 2.0 * math.pi / 60.0  # removed H-conservative no-load speed
 DEPLOY_YAML = (
   "/home/huy/Hightorque_Pi/mini_pi_fsm/deploy/robots/mini_pi/config/policy/velocity/"
   "mjlab47/params/deploy.yaml"
@@ -222,10 +222,10 @@ def t06_target_hold(_):
   )
 
 
-def _reference_pipeline(a, q_prev, default, scale, lo, hi, slew):
+def _reference_pipeline(a, default, scale, lo, hi):
+  """raw clip -> scale -> physical clip; no slew (pd16_noslew)."""
   a_c = np.clip(a, -RAW_CLIP, RAW_CLIP)
-  q_cmd = np.clip(default + scale * a_c, lo, hi)
-  return np.clip(q_cmd, q_prev - slew, q_prev + slew), a_c
+  return np.clip(default + scale * a_c, lo, hi), a_c
 
 
 def t07_action_mapping(_):
@@ -235,46 +235,27 @@ def t07_action_mapping(_):
   ok_scale = np.allclose(t.scale.cpu().numpy(), scale)
   lo = np.array([JOINT_RANGES[n][0] for n in JOINT_NAMES])
   hi = np.array([JOINT_RANGES[n][1] for n in JOINT_NAMES])
-  slew = 3.0 * 0.02
   gen = torch.Generator(device="cpu").manual_seed(0)
-  q_prev = None
-  worst = 0.0
-  max_step = 0.0
-  entry_err = 0.0
-  entry = np.ones(8, dtype=bool)
-  n_entries = 0
+  worst, max_jump, in_range = 0.0, 0.0, True
+  prev = None
   for k in range(40):
-    q = env.scene["robot"].data.joint_pos[:, t._ids].cpu().numpy()
     mag = [0.05, 1.0, 5.0, 80.0][k % 4]
     a = (torch.randn(8, 12, generator=gen) * mag).numpy()
-    if q_prev is None:
-      q_prev = np.zeros_like(q)
-    # Entry (first step, or first step after a reset): measured pose, clipped.
-    q_prev[entry] = np.clip(q[entry], lo, hi)
-    ref, _ = _reference_pipeline(a, q_prev, 0.0, scale, lo, hi, slew)
-    _, _, term_buf, to_buf, _ = env.step(torch.tensor(a, device=DEV, dtype=torch.float))
+    ref, _ = _reference_pipeline(a, 0.0, scale, lo, hi)
+    env.step(torch.tensor(a, device=DEV, dtype=torch.float))
     got = t.q_star.cpu().numpy()
-    if k == 0:
-      entry_err = float(np.abs(got - ref).max())
     worst = max(worst, float(np.abs(got - ref).max()))
-    max_step = max(max_step, float(np.abs(got - q_prev).max()))
-    n_entries += int(entry.sum())
-    q_prev = got
-    entry = (term_buf | to_buf).cpu().numpy()
-  # Small actions within the slew reach q_default + scale * a exactly.
-  env.reset()
-  for _ in range(60):
-    env.step(torch.zeros(8, 12, device=DEV))
-  a = torch.full((8, 12), 0.05, device=DEV)
-  env.step(a)
-  exact = float((t.q_star - torch.tensor(scale, device=DEV) * 0.05).abs().max())
+    in_range &= bool((got >= lo - 1e-6).all() and (got <= hi + 1e-6).all())
+    if prev is not None:
+      max_jump = max(max_jump, float(np.abs(got - prev).max()))
+    prev = got
   env.close()
-  ok = ok_scale and worst < 1e-5 and max_step <= slew + 1e-6 and exact < 1e-5
+  # No slew: consecutive targets jump far beyond the old 0.06 rad / step.
+  ok = ok_scale and worst < 1e-5 and in_range and max_jump > 1.0
   return ok, (
-    f"per-joint scale {scale[:6].tolist()}; |sim - reference pipeline| max {worst:.1e} "
-    f"(entry step {entry_err:.1e}, {n_entries} entries incl. resets); max |q*_t - q*_t-1| "
-    f"{max_step:.4f} <= {slew}; "
-    f"small action exact {exact:.1e}"
+    f"per-joint scale {scale[:6].tolist()}; |sim - (raw clip -> scale -> range clip)| "
+    f"max {worst:.1e}; targets inside XML ranges {in_range}; no slew: max "
+    f"|q*_t - q*_t-1| {max_jump:.2f} rad (old limit 0.06)"
   )
 
 
@@ -293,41 +274,67 @@ def t08_action_clip(_):
   )
 
 
-def t09_torque_speed_curve(_):
-  m = H_CONSERVATIVE
-  w0 = m.omega0
-  qd = torch.tensor([0.0, 1.0, 1.869, 3.0, 5.24, w0, 9.0, -3.0, -w0, -20.0])
-  lo, hi = motor_envelope(qd, m)
-  hand = {  # index: hand-computed (tau_min, tau_max)
-    0: (-16.0, 16.0),
-    3: (-16.0, 21 * (1 - 3 / w0)),  # 12.98 Nm at the 3 rad/s envelope
-    4: (-16.0, 21 * (1 - 5.24 / w0)),  # 6.98 Nm at the rated speed
-    5: (-16.0, 0.0),  # no-load speed
-    6: (-16.0, 21 * (1 - 9.0 / w0)),  # beyond no-load: braking only
-    7: (-(21 * (1 - 3 / w0)), 16.0),
-    # -20 rad/s, beyond omega0 (1 + cap / stall) = 13.8 rad/s: the linear motor can
-    # only brake (generator regime), at the cap: tau_min = tau_max = +16.
-    9: (16.0, 16.0),
-  }
-  ok = True
-  for i, (l_ref, h_ref) in hand.items():
-    ok &= abs(float(lo[i]) - l_ref) < 1e-4 and abs(float(hi[i]) - h_ref) < 1e-4
-  return ok, (
-    f"H-conservative: tau_max(0)=16, (3 rad/s)={float(hi[3]):.2f}, (5.24)={float(hi[4]):.2f}, "
-    f"(7.85)={float(hi[5]):.2f}, (9.0)={float(hi[6]):.2f}; braking capped at -16"
-  )
+def _floating_joint_run(jn: str, frac: float = 0.9):
+  """Robot floating (no gravity, no contacts); square-wave targets on one joint.
+  Returns per physics step (qd, force, unclipped PD) of that joint."""
 
-
-def _substep_check(task, motor: MotorEnvelopeCfg, steps=150, n=32, slew=None):
   def mutate(cfg):
-    cfg.actions["joint_pos"].motor = copy.deepcopy(motor)
-    if slew is not None:
-      cfg.actions["joint_pos"].slew_rate = slew
+    cfg.sim.mujoco.gravity = (0.0, 0.0, 0.0)
+    cfg.sim.mujoco.disableflags = ("contact",)
+    cfg.terminations.pop("fell")
 
-  env = make_env(task, n, mutate=mutate)
+  env = make_env(WALK, 1, play=True, mutate=mutate)
+  t = term(env)
+  j = JOINT_NAMES.index(jn)
+  lo, hi = JOINT_RANGES[jn]
+  kp = KP[jn[2:].replace("_joint", "")]
+  kd = KD[jn[2:].replace("_joint", "")]
+  rows = []
+  step = env.sim.step
+
+  def logged():
+    d = env.scene["robot"].data
+    q = float(d.joint_pos[0, t._ids[j]])
+    qd = float(d.joint_vel[0, t._ids[j]])
+    pd = kp * (float(t.q_star[0, j]) - q) - kd * qd
+    step()
+    rows.append((qd, float(env.sim.data.actuator_force[0, t._ctrl[j]]), pd))
+
+  env.sim.step = logged
+  for k in range(60):
+    a = torch.zeros(1, 12, device=DEV)
+    a[:, j] = (frac * hi if (k // 15) % 2 == 0 else frac * lo) / float(t.scale[j])
+    env.step(a)
+  env.sim.step = step
+  env.close()
+  return np.array(rows)
+
+
+def t09_no_derating(_):
+  """The cap is the only limit: where the unclipped PD exceeds 16 Nm, the force is
+  +-16 Nm at any speed, including speeds above the removed 7.85 rad/s no-load speed
+  (the old envelope gave 0 Nm motoring torque there)."""
+  out, ok = [], True
+  for jn in ("r_hip_pitch_joint", "r_calf_joint"):
+    r = _floating_joint_run(jn)
+    qd, f, pd = r[:, 0], r[:, 1], r[:, 2]
+    sat = np.abs(pd) > TAU_CAP
+    motoring_fast = sat & (np.sign(pd) == np.sign(qd)) & (np.abs(qd) > OLD_OMEGA0)
+    err_sat = float(np.abs(np.abs(f[sat]) - TAU_CAP).max()) if sat.any() else 0.0
+    ok &= bool(motoring_fast.any()) and err_sat < 1e-3
+    out.append(
+      f"{jn[2:-6]}: {int(motoring_fast.sum())} saturated motoring steps at "
+      f"|qd| > {OLD_OMEGA0:.2f} rad/s (max {np.abs(qd[motoring_fast]).max() if motoring_fast.any() else 0:.1f}), "
+      f"|force| there = 16 Nm (err {err_sat:.1e}); peak |qd| {np.abs(qd).max():.1f}"
+    )
+  return ok, "; ".join(out)
+
+
+def _substep_check(task, steps=150, n=32):
+  env = make_env(task, n)
   t = term(env)
   step = env.sim.step
-  stats = {"viol": 0.0, "absmax": 0.0, "env_err": 0.0, "qdmax": 0.0}
+  stats = {"absmax": 0.0, "err": 0.0, "qdmax": 0.0, "sat": 0}
   kp = torch.tensor([KP[n[2:].replace("_joint", "")] for n in JOINT_NAMES], device=DEV)
   kd = torch.tensor([KD[n[2:].replace("_joint", "")] for n in JOINT_NAMES], device=DEV)
 
@@ -335,18 +342,17 @@ def _substep_check(task, motor: MotorEnvelopeCfg, steps=150, n=32, slew=None):
     d = env.scene["robot"].data
     qd = d.joint_vel[:, t._ids].clone()
     q = d.joint_pos[:, t._ids].clone()
-    lo, hi = motor_envelope(qd, motor)
     p = t.passive.unsqueeze(-1)
     kp_e = torch.where(p, torch.zeros_like(kp), kp)
     kd_e = torch.where(p, torch.ones_like(kd), kd)
-    ref = torch.clamp(kp_e * (t.q_star - q) - kd_e * qd, lo, hi)
+    pd = kp_e * (t.q_star - q) - kd_e * qd
+    ref = torch.clamp(pd, -TAU_CAP, TAU_CAP)
     step()
     f = env.sim.data.actuator_force[:, t._ctrl]
-    # Force exactly = clip(PD, envelope(qd at step start)) (explicit force part).
-    stats["env_err"] = max(stats["env_err"], float((f - ref).abs().max()))
-    stats["viol"] = max(stats["viol"], float((lo - f).max()), float((f - hi).max()))
+    stats["err"] = max(stats["err"], float((f - ref).abs().max()))
     stats["absmax"] = max(stats["absmax"], float(f.abs().max()))
     stats["qdmax"] = max(stats["qdmax"], float(qd.abs().max()))
+    stats["sat"] += int((pd.abs() > TAU_CAP).sum())
 
   env.sim.step = checked
   g = torch.Generator(device="cpu").manual_seed(1)
@@ -360,78 +366,47 @@ def _substep_check(task, motor: MotorEnvelopeCfg, steps=150, n=32, slew=None):
 def t10_torque_cap(_):
   out = []
   ok = True
-  for task in (WALK, REC):
-    for motor in (H_CONSERVATIVE, H_LOOSE):
-      s = _substep_check(task, motor)
-      ok &= (
-        s["absmax"] <= motor.tau_cap + 1e-4
-        and s["viol"] <= 1e-4
-        and s["env_err"] < 1e-3
-      )
-      out.append(
-        f"{task.split('-')[-1]}/{motor.name}: |tau|max {s['absmax']:.2f}, "
-        f"envelope violation {s['viol']:.1e}, |force - clip(PD, env)| {s['env_err']:.1e}"
-      )
+  for task in (WALK, REC_STATELESS):
+    s = _substep_check(task)
+    ok &= s["absmax"] <= TAU_CAP + 1e-4 and s["err"] < 1e-3 and s["sat"] > 0
+    out.append(
+      f"{task.split('-')[-1]}: |tau|max {s['absmax']:.2f} <= 16, "
+      f"|force - clip(kp(q*-q) - kd qd, +-16)| {s['err']:.1e} "
+      f"({s['sat']} saturated samples, passive kp 0 / kd 1 included)"
+    )
   return ok, "; ".join(out)
 
 
-def t11_no_load_speed(_):
-  """Robot floating without gravity or contacts; square-wave targets on single joints:
-  the actuator alone drives them, so joint speed must saturate at omega0 under
-  H-conservative and go beyond it under H-loose."""
-  joints = (
-    "r_calf_joint",
-    "r_thigh_joint",
-    "r_ankle_pitch_joint",
-    "r_ankle_roll_joint",
+def t11_qd_penalty(_):
+  """qd_soft_envelope = sum(relu(|qd| - 6.28)^2), weight -0.01 in every stage."""
+  from minipi_getup.ftsr_ref.config.rewards import REWARD_TABLE
+  from minipi_getup.ftsr_ref.mdp import rewards as R
+
+  (w, params) = REWARD_TABLE["qd_soft_envelope"]
+  qd = torch.tensor(
+    [
+      [6.28] + [0.0] * 11,
+      [-6.28] + [0.0] * 11,
+      [6.0, -5.0] + [0.0] * 10,
+      [7.28] + [0.0] * 11,
+      [-7.28, 8.28] + [0.0] * 10,
+    ]
   )
-  peaks: dict[tuple[str, str, bool], float] = {}
-  for motor in (H_CONSERVATIVE, H_LOOSE):
-    for slew in (False, True):
-      for jn in joints:
-
-        def mutate(cfg, motor=motor, slew=slew):
-          cfg.actions["joint_pos"].motor = copy.deepcopy(motor)
-          if not slew:
-            cfg.actions["joint_pos"].slew_rate = 0.0
-          cfg.sim.mujoco.gravity = (0.0, 0.0, 0.0)
-          cfg.sim.mujoco.disableflags = ("contact",)
-          cfg.terminations.pop("fell")
-
-        env = make_env(WALK, 1, play=True, mutate=mutate)
-        t = term(env)
-        j = JOINT_NAMES.index(jn)
-        lo, hi = JOINT_RANGES[jn]
-        box = {"peak": 0.0}
-
-        def logged(env=env, step=env.sim.step, col=int(t._ids[j]), box=box):
-          step()
-          qd = float(env.scene["robot"].data.joint_vel[:, col].abs().max())
-          box["peak"] = max(box["peak"], qd)
-
-        step = env.sim.step
-        env.sim.step = logged
-        for k in range(60):
-          a = torch.zeros(1, 12, device=DEV)
-          a[:, j] = (0.9 * hi if (k // 15) % 2 == 0 else 0.9 * lo) / float(t.scale[j])
-          env.step(a)
-        env.sim.step = step
-        env.close()
-        peaks[(motor.name, jn, slew)] = box["peak"]
-  w0 = H_CONSERVATIVE.omega0
-  cons_raw = [peaks[("H-conservative", j, False)] for j in joints]
-  loose_raw = [peaks[("H-loose", j, False)] for j in joints]
-  # Calf / hip yaw / ankle pitch saturate at omega0; the ankle roll (4.4e-4 kg m^2)
-  # overshoots on raw target jumps by the first physics step's PD acceleration.
-  ok = all(p <= 1.03 * w0 for p in cons_raw[:3]) and cons_raw[3] <= 1.3 * w0
-  ok &= all(lp > cp + 0.5 for lp, cp in zip(loose_raw[:3], cons_raw[:3], strict=True))
-  rows = [
-    f"{j.split('_', 1)[1].replace('_joint', '')}: cons {peaks[('H-conservative', j, False)]:.2f}"
-    f"/slew {peaks[('H-conservative', j, True)]:.2f}, loose {peaks[('H-loose', j, False)]:.2f}"
-    for j in joints
-  ]
-  return ok, f"peak |qd| rad/s (omega0 {w0:.2f}, raw jumps / with slew): " + "; ".join(
-    rows
+  orig = R._qd
+  R._qd = lambda env: qd
+  try:
+    got = R.qd_soft_envelope.compute(None, None, **params)
+  finally:
+    R._qd = orig
+  ref = torch.tensor([0.0, 0.0, 0.0, 1.0, 5.0])
+  ok = (
+    params == {"limit": 6.28}
+    and tuple(w) == (-0.01, -0.01, -0.01)
+    and torch.allclose(got.float(), ref, atol=1e-5)
+  )
+  return ok, (
+    f"limit {params['limit']}, weights {w}; penalty at |qd| = 6.28 / 6.0 / 7.28 / "
+    f"(7.28, 8.28): {got.tolist()} (expected {ref.tolist()})"
   )
 
 
@@ -501,14 +476,13 @@ def t14_last_action(_):
   a = torch.randn(4, 12, device=DEV) * 2
   env.step(a)
   o = env.get_observations()["actor"]
-  ok_act = torch.allclose(o[:, 36:48], a)  # raw (within raw clip), before slew
-  ok_differs = not torch.allclose(
-    t.q_star, torch.tensor(per_joint(ACTION_SCALE), device=DEV, dtype=torch.float) * a
-  )
+  ok_act = torch.allclose(o[:, 36:48], a)  # raw (within raw clip)
+  sc = torch.tensor(per_joint(ACTION_SCALE), device=DEV, dtype=torch.float)
+  ok_target = torch.allclose(t.q_star, torch.clamp(sc * a, t.q_min, t.q_max))
   env.close()
-  return ok_passive and ok_act and ok_differs, (
+  return ok_passive and ok_act and ok_target, (
     f"zero in passive window {ok_passive}; = raw-clipped action after it {ok_act}; "
-    f"not the slewed target {ok_differs}"
+    f"PD target = clip(scale * action) (no slew) {ok_target}"
   )
 
 
@@ -830,21 +804,17 @@ def t22_settled_reset(_):
 def t23_random_rollout(_):
   out = []
   ok = True
-  for task in (WALK, REC):
-    for motor in (H_CONSERVATIVE, H_LOOSE):
-
-      def mutate(cfg, motor=motor):
-        cfg.actions["joint_pos"].motor = copy.deepcopy(motor)
-
-      env = make_env(task, 64, mutate=mutate)
+  for task in (WALK, REC_STATELESS):
+    for mag in (2.0, 50.0):  # 50: raw-clip-sized, bang-bang targets
+      env = make_env(task, 64)
       bad = 0
       for _ in range(300):
-        obs, rew, *_ = env.step(torch.randn(64, 12, device=DEV) * 2)
+        obs, rew, *_ = env.step(torch.randn(64, 12, device=DEV) * mag)
         bad += int(sum(int((~torch.isfinite(x)).sum()) for x in obs.values()))
         bad += int((~torch.isfinite(rew)).sum())
       env.close()
       ok &= bad == 0
-      out.append(f"{task.split('-')[-1]}/{motor.name}: {bad} non-finite")
+      out.append(f"{task.split('-')[-1]}/action std {mag}: {bad} non-finite")
   return ok, "300 steps x 64 envs, " + ", ".join(out)
 
 
@@ -979,6 +949,99 @@ def t27_stage_checkpoint(_):
   )
 
 
+def t28_stateless_v2_config(_):
+  """The training task keeps the v2 method: stateless stages, thresholds, reward
+  targets, Eq. 4 schedule, passive window, physics / policy timing."""
+  from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+
+  cfg = load_env_cfg(REC_STATELESS)
+  st = cfg.events["stage_setup"].params["stage"]
+  act = cfg.actions["joint_pos"]
+  rl = load_rl_cfg(REC_STATELESS)
+  checks = {
+    "stateless": st.monotonic is False,
+    "thresholds": np.allclose(st.heights, (0.19, 0.276, 0.345)),
+    "reward targets": np.allclose(st.reward_heights, (0.21375, 0.276, 0.345)),
+    "2/3 rule": abs(st.fraction - 2.0 / 3.0) < 1e-12,
+    "assist end 3000": act.assist.end_iteration == 3000,
+    "passive 2 s": act.passive_steps == 100,
+    "timing 0.5 ms x 40": cfg.sim.mujoco.timestep == 0.0005 and cfg.decimation == 40,
+    "no slew attr": not hasattr(act, "slew_rate"),
+    "entropy 0.01 / std 1.0": rl.entropy_coef == 0.01 and rl.init_noise_std == 1.0,
+    "eval task stateless": rl.eval_task == REC_STATELESS,
+  }
+  return all(checks.values()), str(checks)
+
+
+def t29_nonfinite_guard(_):
+  """A non-finite PPO minibatch is skipped (parameters unchanged and finite); three
+  consecutive bad iterations stop training. Finite batches are untouched."""
+  from dataclasses import asdict
+
+  from mjlab.rl import RslRlVecEnvWrapper
+
+  from minipi_getup.ftsr_ref.config.rl_cfg import recovery_runner_cfg
+  from minipi_getup.ftsr_ref.rl.runner import FtsrRunner
+
+  cfg = asdict(recovery_runner_cfg())
+  cfg["eval_at"], cfg["eval_every"] = (), 0
+  env = RslRlVecEnvWrapper(make_env(REC_STATELESS, 32))
+  r = FtsrRunner(env, cfg, tempfile.mkdtemp(), DEV)
+  r.learn(1)  # finite: no skips
+  clean = r._consec_ppo == 0 if hasattr(r, "_consec_ppo") else True
+
+  def _rollout(obs):
+    with torch.inference_mode():
+      obs = _rollout_steps(obs)
+    with torch.no_grad():  # as in FtsrRunner.learn
+      lv = r.model.value(r.model.teacher_encoder(obs["teacher"]), obs["critic"])
+      r.storage.compute(lv, 0.99, 0.95, (0.001, 0.001), False, "cost_return", True)
+
+  def _rollout_steps(obs):
+    for _ in range(cfg["num_steps_per_env"]):
+      z_t, z_s, mean, std, value = r.act(obs)
+      a = mean
+      step_obs = {g: obs[g] for g in ("actor", "policy", "teacher", "critic")}
+      obs, rew, dones, _ = env.step(a)
+      r.storage.add(
+        step_obs,
+        z_t=z_t,
+        z_s=z_s,
+        actions=a,
+        log_prob=torch.distributions.Normal(mean, std).log_prob(a).sum(-1),
+        mu=mean,
+        sigma=std,
+        rewards=rew,
+        costs=torch.zeros(32, 2, device=DEV),
+        dones=dones.float(),
+        values=value,
+      )
+    return obs
+
+  def poisoned_update():
+    _rollout(env.get_observations())
+    r.storage.advantages.fill_(float("nan"))
+    before = {n: p.clone() for n, p in r.model.named_parameters()}
+    try:
+      r._update()
+      raised = False
+    except RuntimeError as e:
+      if "persistent non-finite" not in str(e):
+        raise
+      raised = True
+    r.storage.clear()
+    same = all(torch.equal(before[n], p) for n, p in r.model.named_parameters())
+    return raised, same
+
+  raised, same = poisoned_update()
+  env.close()
+  ok = clean and raised and same
+  return ok, (
+    f"finite iteration clean {clean}; all-NaN advantages: every minibatch skipped, "
+    f"parameters unchanged {same}, training stopped (RuntimeError) {raised}"
+  )
+
+
 def t25_onnx(_):
   from minipi_getup.ftsr_ref.export import export_onnx, onnx_parity
   from minipi_getup.ftsr_ref.rl.modules import FtsrModel
@@ -1011,11 +1074,11 @@ TESTS = [
   (4, "hardware PD gains, no armature", t04_pd_gains),
   (5, "sim policy timing", t05_timing),
   (6, "target hold (ZOH) within a policy step", t06_target_hold),
-  (7, "action -> q_target mapping + slew + entry init", t07_action_mapping),
+  (7, "action -> q_target mapping (no slew), targets in ranges", t07_action_mapping),
   (8, "action clipping", t08_action_clip),
-  (9, "torque-speed curve", t09_torque_speed_curve),
-  (10, "torque <= cap and inside envelope (substeps)", t10_torque_cap),
-  (11, "no-load-speed behavior", t11_no_load_speed),
+  (9, "no torque-speed derating", t09_no_derating),
+  (10, "PD torque = clip(PD, +-16) <= cap (substeps)", t10_torque_cap),
+  (11, "qd soft penalty 6.28", t11_qd_penalty),
   (12, "actor observation layout", t12_actor_layout),
   (13, "student history layout", t13_history_layout),
   (14, "last_action semantics", t14_last_action),
@@ -1032,6 +1095,8 @@ TESTS = [
   (25, "PyTorch -> ONNX equivalence", t25_onnx),
   (26, "monotonic stage latch", t26_monotonic_stage),
   (27, "stage persists in checkpoints", t27_stage_checkpoint),
+  (28, "training task keeps the v2 method", t28_stateless_v2_config),
+  (29, "non-finite PPO guard", t29_nonfinite_guard),
 ]
 
 

@@ -1,31 +1,23 @@
-"""Deployment-equivalent joint-position action with the Mini-Pi plant.
+"""Joint-position action with the Mini-Pi plant (experiment pd16_noslew).
 
-Per policy step (``process_actions``), identical to the deploy runtime contract
-(docs/MINIPI_DEPLOYMENT_CONTRACT_V2.md, consequence 4)::
+Per policy step (``process_actions``)::
 
     a_c    = clip(a, -raw_clip, raw_clip)                 raw clip
     q_cmd  = q_default + scale * a_c                      absolute target
-    q_cmd  = clip(q_cmd, q_min, q_max)                    physical per-joint clip
-    q*_t   = clip(q_cmd, q*_{t-1} - s, q*_{t-1} + s)      slew, s = 3 rad/s * 0.02 s
-    PD     tau = kp (q*_t - q) - kd qdot, held 10 x 2 ms  native position actuator
+    q*     = clip(q_cmd, q_min, q_max)                    physical per-joint clip
+    PD     tau = clip(kp (q* - q) - kd qdot, -16, 16)     native position actuator,
+                                                          held 40 x 0.5 ms
 
-- ``q*_{t-1}`` is the previous commanded target. At state entry (the first actuated
-  step after a reset) it is the measured pose clipped to the physical ranges.
-- ``last_action`` (observation) is the raw-clipped network output ``a_c``, before the
-  slew, zero at reset and during the passive window (deploy semantics).
+- No target slew / rate limit (removed in this experiment), no torque-speed
+  derating. Measured qdot and the tracking error q* - q are never clamped.
+- ``last_action`` (observation) is the raw-clipped network output ``a_c``, zero at
+  reset and during the passive window (deploy semantics).
 - Passive window (``passive_steps`` after a reset, recovery task only): the deploy
-  Passive state, kp 0 / kd 1 on every joint; actions, observations and assistance off.
-  It replaces the release's "action 0 = hold default pose" window (classified
-  HARDWARE_CONSTRAINT: the robot enters GetUp from Passive and the slew contract
-  forbids jumping to the default pose).
+  Passive state, kp 0 / kd 1 on every joint; actions, observations and assistance
+  off. The effective gains are written to the actuator once per policy step.
 
-Per physics step (``apply_actions``):
-
-- Motor envelope: the four-quadrant DC curve of ``config/robot.py``, applied as the
-  active affine piece of the actuator law (``_write_actuator_law``; implicit in the
-  velocity slope). Measured qdot is never clamped.
-- Eq. 4 assistance (``assistance.py``), if configured.
-- Substep monitor: torque, qdot and tracking-error histograms per joint.
+Per physics step (``apply_actions``): Eq. 4 assistance (``assistance.py``) if
+configured, and the substep monitor (torque, qdot, tracking error).
 """
 
 from __future__ import annotations
@@ -41,7 +33,8 @@ from minipi_getup.ftsr_ref.config.robot import (
   JOINT_NAMES,
   JOINT_RANGES,
   PASSIVE_KD,
-  MotorEnvelopeCfg,
+  TAU_CAP,
+  TAU_RATED_REPORT,
 )
 from minipi_getup.ftsr_ref.mdp.assistance import AssistCfg, eq4_wrench, time_coeff
 from minipi_getup.ftsr_ref.mdp.stages import STAGE_KEY
@@ -52,21 +45,10 @@ if TYPE_CHECKING:
 COST_KEY = "ftsr_constraint_cost"
 
 
-def motor_envelope(
-  qd: torch.Tensor, motor: MotorEnvelopeCfg
-) -> tuple[torch.Tensor, torch.Tensor]:
-  """(tau_min, tau_max) of the linear four-quadrant DC curve (= mjlab dc_motor_clip)."""
-  stall, w0, cap = motor.tau_stall, motor.omega0, motor.tau_cap
-  vel_at_cap = w0 * (1.0 + cap / stall)
-  v = torch.clamp(qd, -vel_at_cap, vel_at_cap)
-  tau_max = torch.clamp(stall * (1.0 - v / w0), max=cap)
-  tau_min = torch.clamp(stall * (-1.0 - v / w0), min=-cap)
-  return tau_min, tau_max
-
-
 @requires_model_fields("actuator_gainprm", "actuator_biasprm")
 def plant_setup(env: ManagerBasedRlEnv, env_ids) -> None:
-  """Startup event: only makes the actuator fields per-env (written by the action)."""
+  """Startup event: makes the actuator gain fields per-env (passive gains are
+  written per env by the action term)."""
   del env, env_ids
 
 
@@ -74,14 +56,14 @@ class SubstepMonitor:
   """Physics-step actuator / speed statistics of actuated envs, for training logs.
 
   Cheap sufficient statistics only (per joint): sample count, sum and max of |tau|,
-  |qdot| and |q* - q|, and threshold counts (|qdot| > 3 and > 4 rad/s, |tau| above the
-  candidate rated torque, |tau| >= 0.95 cap). Everything stays on the device during
+  |qdot| and |q* - q|, and threshold counts (|qdot| > 3, > 4 and > ``qd_soft`` rad/s,
+  |tau| above the 6 Nm reporting threshold, |tau| >= 0.95 cap). Everything stays on the device during
   the rollout; ``summary()`` converts once per iteration. Quantiles (p95 / p99) are
   not computed here: ``evaluate.py`` reports them from full histograms.
   """
 
-  def __init__(self, nj: int, num_envs: int, motor: MotorEnvelopeCfg, device):
-    self.motor = motor
+  def __init__(self, nj: int, num_envs: int, device, qd_soft: float = 6.28):
+    self.qd_soft = qd_soft
     self.device = device
     self.nj = nj
     self.ep_qd_max = torch.zeros(num_envs, device=device)
@@ -96,9 +78,8 @@ class SubstepMonitor:
     self.tau_sum, self.tau_max = z(nj), z(nj)
     self.qd_sum, self.qd_max = z(nj), z(nj)
     self.err_sum, self.err_max = z(nj), z(nj)
-    self.qd_over3, self.qd_over4 = z(nj), z(nj)
+    self.qd_over3, self.qd_over4, self.qd_over_soft = z(nj), z(nj), z(nj)
     self.tau_over_rated, self.tau_near_cap = z(nj), z(nj)
-    self.slew_sat, self.slew_n = z(), z()
     self.eps, self.eps_over4 = z(), z()
 
   def add(self, tau, qd, err, mask_f) -> None:
@@ -115,8 +96,9 @@ class SubstepMonitor:
     self.err_max = torch.maximum(self.err_max, ae.amax(0))
     self.qd_over3 += (aq > 3.0).sum(0)
     self.qd_over4 += (aq > 4.0).sum(0)
-    self.tau_over_rated += (at > self.motor.tau_rated).sum(0)
-    self.tau_near_cap += (at >= 0.95 * self.motor.tau_cap).sum(0)
+    self.qd_over_soft += (aq > self.qd_soft).sum(0)
+    self.tau_over_rated += (at > TAU_RATED_REPORT).sum(0)
+    self.tau_near_cap += (at >= 0.95 * TAU_CAP).sum(0)
     self.ep_qd_max = torch.maximum(self.ep_qd_max, aq.amax(-1))
 
   def end_episodes(self, env_ids) -> None:
@@ -145,8 +127,8 @@ class SubstepMonitor:
       "qd_frac_above_3": float(self.qd_over3.sum()) / (n * nj),
       "qd_frac_above_4": float(self.qd_over4.sum()) / (n * nj),
       "tau_frac_above_rated": float(self.tau_over_rated.sum()) / (n * nj),
+      "qd_frac_above_soft": float(self.qd_over_soft.sum()) / (n * nj),
       "tau_frac_near_cap": float(self.tau_near_cap.sum()) / (n * nj),
-      "slew_saturation_fraction": float(self.slew_sat) / max(float(self.slew_n), 1.0),
     }
     for j, name in enumerate(joint_names):
       short = name.replace("_joint", "")
@@ -167,10 +149,9 @@ class FtsrActionCfg(ActionTermCfg):
   scale: dict[str, float] = field(default_factory=dict)
   """Per joint-name regex; every joint must match exactly one entry."""
   raw_clip: float = 50.0
-  slew_rate: float = 3.0
-  """rad/s on the commanded target; 0 disables (not used by the reference tasks)."""
   passive_steps: int = 0
-  motor: MotorEnvelopeCfg = field(default_factory=MotorEnvelopeCfg)
+  qd_soft: float = 6.28
+  """Monitoring threshold for |qdot| (= the qd_soft_envelope reward limit)."""
   assist: AssistCfg | None = None
 
   def build(self, env: ManagerBasedRlEnv) -> FtsrAction:
@@ -201,9 +182,8 @@ class FtsrAction(ActionTerm):
     self.default = ent.data.default_joint_pos[0, self._ids].clone()
     self.q_min = torch.tensor([JOINT_RANGES[x][0] for x in names], device=dev)
     self.q_max = torch.tensor([JOINT_RANGES[x][1] for x in names], device=dev)
-    self.slew_step = cfg.slew_rate * env.step_dt if cfg.slew_rate > 0 else float("inf")
 
-    # Joint -> actuator (ctrl) index, for forcerange / gain writes.
+    # Joint -> actuator (ctrl) index, for the passive-gain writes.
     ctrl = torch.full((nj,), -1, dtype=torch.long)
     local = {int(i): j for j, i in enumerate(ids)}
     for act in ent.actuators:
@@ -242,7 +222,7 @@ class FtsrAction(ActionTerm):
     self._kd_eff = torch.zeros(n, nj, device=dev)
     self._act_f = torch.ones(n, 1, device=dev)
 
-    self.monitor = SubstepMonitor(nj, n, cfg.motor, dev)
+    self.monitor = SubstepMonitor(nj, n, dev, cfg.qd_soft)
 
   # ActionTerm interface.
 
@@ -270,36 +250,16 @@ class FtsrAction(ActionTerm):
       self._kp = model.actuator_gainprm[:, self._ctrl, 0].clone()
       self._kd = -model.actuator_biasprm[:, self._ctrl, 2].clone()
 
-  def _write_actuator_law(self, q: torch.Tensor, qd: torch.Tensor) -> None:
-    """Select the active affine piece of tau = clip(tau_PD, L(qd), U(qd)).
-
-    tau_PD = kp (q* - q) - kd qd (deploy gains, or kp 0 / kd 1 when passive).
-    U(qd) = stall (1 - qd / w0), L(qd) = stall (-1 - qd / w0), both inside +-cap.
-    Where the PD force exceeds a curve, the actuator law becomes that curve,
-    tau = +-stall - (stall / w0) qd, written as an affine bias so that MuJoCo's
-    implicitfast integrator treats its velocity slope implicitly; the forcerange is
-    the static +-cap. The force equals ``motor_envelope`` clipping exactly; only the
-    integration of the velocity dependence is implicit (an explicit per-step bound
-    oscillates on the ankle-roll joint, whose inertia is 4.4e-4 kg m^2:
-    dt stall / (w0 I) = 12 > 2).
-    """
-    m = self.cfg.motor
-    kp, kd = self._kp_eff, self._kd_eff
-    tau_pd = kp * (self.q_star - q) - kd * qd
-    slope = m.tau_stall / m.omega0
-    upper = m.tau_stall - slope * qd
-    lower = -m.tau_stall - slope * qd
-    on_upper = tau_pd > upper
-    on_lower = tau_pd < lower
-    curve = on_upper | on_lower
+  def _write_gains(self) -> None:
+    """Write the effective PD law (deploy gains, or kp 0 / kd 1 when passive) as the
+    position actuator's affine law: tau = kp (q* - q) - kd qdot, clipped by the
+    static forcerange +-TAU_CAP. Once per policy step (gains only change there)."""
     model = self._env.sim.model
     c = self._ctrl
-    model.actuator_gainprm[:, c, 0] = torch.where(curve, 0.0, kp)
-    model.actuator_biasprm[:, c, 0] = (
-      on_upper.float() - on_lower.float()
-    ) * m.tau_stall
-    model.actuator_biasprm[:, c, 1] = torch.where(curve, 0.0, -kp)
-    model.actuator_biasprm[:, c, 2] = torch.where(curve, -slope, -kd)
+    model.actuator_gainprm[:, c, 0] = self._kp_eff
+    model.actuator_biasprm[:, c, 0] = 0.0
+    model.actuator_biasprm[:, c, 1] = -self._kp_eff
+    model.actuator_biasprm[:, c, 2] = -self._kd_eff
 
   def process_actions(self, actions: torch.Tensor) -> None:
     env = self._env
@@ -308,7 +268,6 @@ class FtsrAction(ActionTerm):
     passive = (k < self.cfg.passive_steps) & ~self.entered
     entry = ~passive & ~self.entered
     q_meas = torch.clamp(q, self.q_min, self.q_max)
-    self.q_star = torch.where(entry.unsqueeze(-1), q_meas, self.q_star)
     self.entered |= entry
     self.passive = passive
     self._nominal_gains()
@@ -325,16 +284,11 @@ class FtsrAction(ActionTerm):
     self._raw = a
 
     q_cmd = torch.clamp(self.default + self.scale * a, self.q_min, self.q_max)
-    delta = q_cmd - self.q_star
-    step = self.slew_step
-    q_new = self.q_star + torch.clamp(delta, -step, step)
-    act = ~passive
-    self.q_star = torch.where(passive.unsqueeze(-1), q_meas, q_new)
+    # No slew: the clipped command is the PD target (passive: hold the measured pose,
+    # irrelevant with kp 0).
+    self.q_star = torch.where(passive.unsqueeze(-1), q_meas, q_cmd)
     self.q_cmd = q_cmd
-
-    sat = (delta.abs() > step + 1e-6) & act.unsqueeze(-1)
-    self.monitor.slew_sat += sat.sum()
-    self.monitor.slew_n += act.sum() * delta.shape[1]
+    self._write_gains()
 
     self._cost.zero_()
     self._substeps = 0
@@ -355,7 +309,6 @@ class FtsrAction(ActionTerm):
       tau = data.qfrc_actuator[:, self._ids]
       self.monitor.add(tau, qd, self.q_star - q, self._act_f)
 
-    self._write_actuator_law(q, qd)
     self._entity.set_joint_position_target(self.q_star, joint_ids=self._ids)
 
     a_cfg = self.cfg.assist

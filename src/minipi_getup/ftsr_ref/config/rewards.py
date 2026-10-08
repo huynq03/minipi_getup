@@ -29,18 +29,18 @@ is dropped).
 | pen_torque_limits | sum relu(|tau|-0.8 tau_lim) | - | - | -0.05 | (not listed) | tau_lim = 16 Nm cap | ROBOT_ADAPTATION (motor) |
 | pen_action_smoothness_l2 | sum(a_t-2a_{t-1}+a_{t-2})^2 | - | - | -0.02 | Action smooth. | same | release |
 | pen_joint_power_l2 | sum|qd||tau| * 1[h<0.7] | - | - | -1e-4 | Dof ener. | gate 0.7 L/L_ref | ROBOT_ADAPTATION (length) |
-| qd_soft_envelope | (not in release) | | | | | sum relu(|qd|-3)^2, -0.01 all stages | HARDWARE_CONSTRAINT (user operational contract) |
+| qd_soft_envelope | (not in release) | | | | | sum relu(|qd|-6.28)^2, -0.01 all stages (pd16_noslew; v0-v2: 3.0) | HARDWARE_CONSTRAINT (user operational contract) |
 
 L = 0.345 m (Mini-Pi stance), L_ref = 0.75 m; m = 6.94 kg, m_ref = 27.669 kg.
 """
 
 from minipi_getup.ftsr_ref.config.robot import (
   GRAVITY,
-  H_CONSERVATIVE,
   LENGTH_RATIO,
   MINIPI_MASS,
   MINIPI_WEIGHT,
   REF_MASS,
+  TAU_CAP,
 )
 
 FEET_SENSOR = "feet_contact"
@@ -88,9 +88,10 @@ REWARD_TABLE: dict[str, tuple[tuple[float, float, float], dict]] = {
   "pen_dof_pos_limits": ((0.0, 0.0, -5.0), {"soft": 0.9}),
   "pen_torque_limits": (
     (0.0, 0.0, -0.05),
-    {"limit": H_CONSERVATIVE.tau_cap, "soft": 0.8},
+    {"limit": TAU_CAP, "soft": 0.8},
   ),
   "pen_action_smoothness_l2": ((0.0, 0.0, -0.02), {}),
   "pen_joint_power_l2": ((0.0, 0.0, -1.0e-4), {"max_height": 0.7 * LENGTH_RATIO}),
-  "qd_soft_envelope": ((-0.01, -0.01, -0.01), {"limit": 3.0}),
+  # pd16_noslew: limit 6.28 rad/s (was 3.0); same weight, all stages.
+  "qd_soft_envelope": ((-0.01, -0.01, -0.01), {"limit": 6.28}),
 }
