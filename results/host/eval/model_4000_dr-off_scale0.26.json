@@ -1,0 +1,47 @@
+{
+  "checkpoint": "logs/host/Pi_ground/Oct08_01-49-14_host_reproduction_v1/model_4000.pt",
+  "settings": {
+    "num_envs": 256,
+    "episodes": 3,
+    "episode_s": 5.0,
+    "domain_randomization": false,
+    "pull_force": false,
+    "action_scale": 0.26,
+    "policy": "deterministic (act_inference)",
+    "obs_noise": false
+  },
+  "success_host_metric": 1.0,
+  "success_sustained_upright_last_1s": 1.0,
+  "success_host_std_over_episodes": 0.0,
+  "time_to_stand_s_mean": 0.6261979341506958,
+  "time_to_stand_s_median": 0.6399999856948853,
+  "stood_upright_frac": 1.0,
+  "peak_torque_mean": 8.214423179626465,
+  "peak_torque_max": 8.5064058303833,
+  "per_joint_peak_torque": {
+    "r_hip_pitch_joint": 8.5064058303833,
+    "r_hip_roll_joint": 4.699296474456787,
+    "r_thigh_joint": 5.00655460357666,
+    "r_calf_joint": 7.916069507598877,
+    "r_ankle_pitch_joint": 4.300674915313721,
+    "r_ankle_roll_joint": 2.249509811401367,
+    "l_hip_pitch_joint": 7.768081188201904,
+    "l_hip_roll_joint": 4.776337146759033,
+    "l_thigh_joint": 4.8105692863464355,
+    "l_calf_joint": 8.381610870361328,
+    "l_ankle_pitch_joint": 4.093423843383789,
+    "l_ankle_roll_joint": 1.4306120872497559
+  },
+  "joint_vel_mean": 0.7098077535629272,
+  "joint_vel_peak_mean": 24.999313354492188,
+  "joint_vel_peak_max": 26.87808609008789,
+  "energy_J_mean": 79.22605895996094,
+  "max_base_height_mean": 0.35661792755126953,
+  "final_base_height_mean": 0.35660839080810547,
+  "final_proj_gravity_z_mean": -0.9998645782470703,
+  "thresholds": {
+    "stand_base_m": 0.3173333333333333,
+    "fall_base_m": 0.22666666666666668,
+    "upright_pg_z": -0.8
+  }
+}
