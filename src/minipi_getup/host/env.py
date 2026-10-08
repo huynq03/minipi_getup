@@ -55,6 +55,17 @@ PHYSICS_SUBSTEPS = 2
 # URDF ``effort`` and ``velocity`` of every Pi joint (Isaac Gym dof_props).
 URDF_EFFORT = 20.0
 URDF_VELOCITY = 5.0
+# Per-joint torque limits keyed by joint type ({"hip_pitch": 16.0, ..., "ankle_roll": 6.0},
+# every joint must match exactly one key); None keeps URDF_EFFORT on every joint (the release).
+TORQUE_LIMITS: dict[str, float] | None = None
+
+
+def torque_limit(joint_name: str) -> float:
+  if TORQUE_LIMITS is None:
+    return URDF_EFFORT
+  (v,) = [v for k, v in TORQUE_LIMITS.items() if joint_name.endswith(f"_{k}_joint")]
+  return v
+
 
 # PhysX combines a robot shape's friction with the ground plane's by averaging (default
 # combine mode). The plane has static 0.8 / dynamic 0.7; MuJoCo has one coefficient, so
@@ -114,6 +125,15 @@ def get_robot_cfg(limit_solref: tuple[float, float] | None = None) -> EntityCfg:
           effort_limit=URDF_EFFORT,
           armature=PiCfg.asset.armature,
         ),
+      )
+      if TORQUE_LIMITS is None
+      else tuple(
+        BuiltinMotorActuatorCfg(
+          target_names_expr=(f".*_{k}_joint",),
+          effort_limit=v,
+          armature=PiCfg.asset.armature,
+        )
+        for k, v in TORQUE_LIMITS.items()
       ),
       # ctrl order = joint order, so torques can be written as one (N, 12) block.
     ),
@@ -481,7 +501,9 @@ class LeggedRobot_Pi:
     lim = robot.data.joint_pos_limits[0].clone()
     self.dof_pos_limits = lim * self.cfg.rewards.soft_dof_pos_limit
     self.dof_vel_limits = torch.full((self.num_dof,), URDF_VELOCITY, device=self.device)
-    self.torque_limits = torch.full((self.num_dof,), URDF_EFFORT, device=self.device)
+    self.torque_limits = torch.tensor(
+      [torque_limit(n) for n in self.dof_names], device=self.device
+    )
 
     feet_names = [s for s in body_names if a.foot_name in s and "auxiliary" not in s]
     self.feet_indices = ids(feet_names)
