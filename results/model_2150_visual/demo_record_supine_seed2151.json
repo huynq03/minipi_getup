@@ -1,0 +1,50 @@
+{
+ "checkpoint": "/home/huy/minipi_getup/logs/rsl_rl/minipi_ftsr_ref/2026-10-07_21-53-02_ftsr_ref_recovery_v2/model_2150.pt",
+ "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless",
+ "policy": "student (deterministic mean action)",
+ "seed": 2151,
+ "envs_per_pose": 64,
+ "env_index_rule": "pose = env_index % 4 (supine, prone, left_side, right_side)",
+ "recovered_criterion": "last 3 s mean base height > 0.19 m and mean upright cos > 0.9511 (18 deg)",
+ "runs": {
+  "no_assist": {
+   "tc": null,
+   "per_pose": {
+    "supine": {
+     "recovered_rate_this_seed": 0.03125,
+     "n": 64,
+     "videos": [
+      {
+       "video": "results/model_2150_visual/videos/no_assist/supine_selected_seed2151_env0.mp4",
+       "recovered": false,
+       "strict_success_0p31m": false,
+       "feet_only_last_3s": false,
+       "final_height_m": 0.0908,
+       "final_upright_cos": 0.3064,
+       "max_height_m": 0.2063,
+       "assist_mean_last_3s_N": 0.0,
+       "population_stage_end": "r_u",
+       "role": "selected",
+       "env_index": 0,
+       "assist_lying_N": 0.0
+      },
+      {
+       "video": "results/model_2150_visual/videos/no_assist/supine_example_success_seed2151_env92.mp4",
+       "recovered": true,
+       "strict_success_0p31m": false,
+       "feet_only_last_3s": true,
+       "final_height_m": 0.2769,
+       "final_upright_cos": 0.9731,
+       "max_height_m": 0.2827,
+       "assist_mean_last_3s_N": 0.0,
+       "population_stage_end": "r_u",
+       "role": "example_success",
+       "env_index": 92,
+       "assist_lying_N": 0.0
+      }
+     ]
+    }
+   }
+  }
+ }
+}
