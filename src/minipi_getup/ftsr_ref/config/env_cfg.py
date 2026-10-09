@@ -223,12 +223,14 @@ def _base_cfg(play: bool) -> ManagerBasedRlEnvCfg:
 
 
 def recovery_env_cfg(
-  play: bool = False, monotonic: bool = True
+  play: bool = False, monotonic: bool = True, target_rate_limit: float = 0.0
 ) -> ManagerBasedRlEnvCfg:
-  """``monotonic=False`` = release stateless stages (recovery v1/v2 semantics)."""
+  """``monotonic=False`` = release stateless stages (recovery v1/v2 semantics).
+  ``target_rate_limit`` > 0: PD-target rate limiter (rad per policy step)."""
   cfg = _base_cfg(play)
   act = cfg.actions["joint_pos"]
   act.passive_steps = PASSIVE_STEPS
+  act.target_rate_limit = target_rate_limit
   if not play:
     act.assist = mdp.AssistCfg(
       f_max=ASSIST_F_MAX,

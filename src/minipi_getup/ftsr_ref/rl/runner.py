@@ -578,6 +578,8 @@ class FtsrRunner:
       self.log_dir or ".",
       "--per-pose",
       str(self.cfg.get("eval_envs_per_pose", 64)),
+      "--task",
+      self.cfg["eval_task"],
     ]
     log = open(os.path.join(out_dir, f"eval_{it}.log"), "w")
     self._eval_procs.append(subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT))

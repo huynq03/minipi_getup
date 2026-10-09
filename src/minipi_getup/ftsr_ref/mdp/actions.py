@@ -5,11 +5,17 @@ Per policy step (``process_actions``)::
     a_c    = clip(a, -raw_clip, raw_clip)                 raw clip
     q_cmd  = q_default + scale * a_c                      absolute target
     q*     = clip(q_cmd, q_min, q_max)                    physical per-joint clip
+    q*     = rate_limit_target(q*, q*_prev, L)            only if target_rate_limit L > 0
     PD     tau = clip(kp (q* - q) - kd qdot, -16, 16)     native position actuator,
                                                           held 40 x 0.5 ms
 
-- No target slew / rate limit (removed in this experiment), no torque-speed
-  derating. Measured qdot and the tracking error q* - q are never clamped.
+- No torque-speed derating. Measured qdot and the tracking error q* - q are never
+  clamped. Target-rate limiter: ``target_rate_limit`` (rad per policy step, default 0 =
+  disabled, the pd16_noslew plant). When enabled, q*_prev is the clipped measured
+  joint position in the passive window and at the first actuated step of each
+  episode (per env, so no target crosses an episode boundary), else the previous q*.
+  It limits the PD target, not the joint speed: a joint may still move faster than
+  L / 20 ms when the PD error, contacts or inertial coupling drive it.
 - ``last_action`` (observation) is the raw-clipped network output ``a_c``, zero at
   reset and during the passive window (deploy semantics).
 - Passive window (``passive_steps`` after a reset, recovery task only): the deploy
@@ -48,6 +54,15 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 COST_KEY = "ftsr_constraint_cost"
+
+
+def rate_limit_target(q_clip: torch.Tensor, base: torch.Tensor, lim: float):
+  """Per-joint PD-target rate limit: base + clip(q_clip - base, -lim, +lim).
+
+  Shared by the training action term and the evaluation wrapper (limiter_eval)."""
+  return base + torch.clamp(q_clip - base, -lim, lim)
+
+
 # Per-env bool: the physics state, a joint reading or the Eq. 4 wrench was non-finite
 # in some physics step of the current policy step.
 INVALID_KEY = "ftsr_invalid_env"
@@ -162,6 +177,8 @@ class FtsrActionCfg(ActionTermCfg):
   passive_steps: int = 0
   qd_soft: float = 6.28
   """Monitoring threshold for |qdot| (= the qd_soft_envelope reward limit)."""
+  target_rate_limit: float = 0.0
+  """Max PD-target change per policy step (rad, per joint); 0 disables it."""
   assist: AssistCfg | None = None
 
   def build(self, env: ManagerBasedRlEnv) -> FtsrAction:
@@ -209,7 +226,10 @@ class FtsrAction(ActionTerm):
     self._prev_raw = torch.zeros_like(self._raw)
     self._prev_prev_raw = torch.zeros_like(self._raw)
     self.q_star = torch.zeros(n, nj, device=dev)
+    self.q_star_prev = torch.zeros(n, nj, device=dev)
     self.q_cmd = torch.zeros(n, nj, device=dev)
+    # Target-rate limiter state: the base q*_prev used in the last policy step.
+    self.rate_base = torch.zeros(n, nj, device=dev)
     self.entered = torch.zeros(n, dtype=torch.bool, device=dev)
     self.passive = torch.zeros(n, dtype=torch.bool, device=dev)
     self._kp: torch.Tensor | None = None  # nominal gains, captured after startup DR
@@ -302,6 +322,13 @@ class FtsrAction(ActionTerm):
     # irrelevant with kp 0).
     self.q_star = torch.where(passive.unsqueeze(-1), q_meas, q_cmd)
     self.q_cmd = q_cmd
+    lim = self.cfg.target_rate_limit
+    if lim > 0.0:
+      # Passive window and first actuated step: start from the measured pose.
+      reinit = (passive | entry).unsqueeze(-1)
+      self.rate_base = torch.where(reinit, q_meas, self.q_star_prev)
+      self.q_star = rate_limit_target(self.q_star, self.rate_base, lim)
+      self.q_star_prev = self.q_star.clone()
     self._write_gains()
 
     self._cost.zero_()
@@ -384,6 +411,7 @@ class FtsrAction(ActionTerm):
     self._prev_raw[env_ids] = 0.0
     self._prev_prev_raw[env_ids] = 0.0
     self.entered[env_ids] = False
+    self.q_star_prev[env_ids] = 0.0  # re-initialized from the measured pose
     self.monitor.end_episodes(env_ids)
     if self.cfg.assist is not None and self._assist_live:
       self.force[env_ids] = 0.0

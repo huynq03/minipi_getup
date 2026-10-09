@@ -63,7 +63,7 @@ def run(args) -> None:
 
   torch.manual_seed(args.seed)
   tc = args.tc if args.mode == "assist" else None
-  env = build_env(TASK, n, mutate, tc)
+  env = build_env(getattr(args, "task", TASK), n, mutate, tc)
   t = env.action_manager.get_term("joint_pos")
   pose = env.extras[POSE_KEY].clone()
   rec = Recorder(env, pose, npose, TAU_RATED_REPORT, TAU_CAP)
@@ -496,6 +496,7 @@ def periodic(args) -> None:
   meta = json.load(open(os.path.join(out, "det_meta.json")))
   a = analyze(z)
   res = {"iteration": args.iteration, "checkpoint": os.path.abspath(args.checkpoint)}
+  res["task"] = args.task
   res["policy_std_mean"] = float(np.mean(meta["policy_std"]))
   per = {}
   for g, name in enumerate(FALLEN_POSE_NAMES):
@@ -577,6 +578,7 @@ def main() -> None:
   q.add_argument("--iteration", type=int, required=True)
   q.add_argument("--run-dir", required=True)
   q.add_argument("--per-pose", type=int, default=64)
+  q.add_argument("--task", default=TASK)
   p = sub.add_parser("report")
   p.add_argument("--out", required=True)
   p.add_argument("--no-video", action="store_true")

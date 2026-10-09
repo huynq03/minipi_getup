@@ -1327,6 +1327,118 @@ def t25_onnx(_):
   return ok, f"inputs {ins}, outputs {outs}, max |onnx - torch| {err:.2e}"
 
 
+def _rate_limiter_case(task, wrap: bool):
+  """Drive 8 envs with large random actions (forced reset of envs 0-1 mid-run) and
+  compare q* with the reference limiter formula at every policy step."""
+  from minipi_getup.ftsr_ref.limiter_eval import _install_limiter
+
+  lim = 0.3
+
+  def mut(cfg):
+    cfg.actions["joint_pos"].passive_steps = 3
+
+  env = make_env(task, 8, play=True, mutate=mut)
+  t = term(env)
+  robot = env.scene["robot"]
+  if wrap:
+    _install_limiter(t, robot, lim)
+  gen = torch.Generator(device=DEV).manual_seed(0)
+  prev = None
+  out = {"mismatch": 0.0, "max_step": 0.0, "entries": 0, "raw": 0.0, "obs": 0.0}
+  for k in range(40):
+    if k == 20:
+      env.reset(env_ids=torch.tensor([0, 1], device=DEV))
+    a = 3.0 * torch.randn(8, 12, generator=gen, device=DEV)
+    was = t.entered.clone()
+    qm = torch.clamp(robot.data.joint_pos[:, t._ids], t.q_min, t.q_max)
+    obs, *_ = env.step(a)
+    ac = torch.clamp(a, -RAW_CLIP, RAW_CLIP)
+    q_clip = torch.clamp(t.default + t.scale * ac, t.q_min, t.q_max)
+    pas = t.passive.unsqueeze(-1)
+    entry = t.entered & ~was
+    base = qm if prev is None else torch.where(pas | entry.unsqueeze(-1), qm, prev)
+    exp = base + torch.clamp(torch.where(pas, qm, q_clip) - base, -lim, lim)
+    out["mismatch"] = max(out["mismatch"], float((t.q_star - exp).abs().max()))
+    act = ~t.passive
+    if act.any():
+      d = (t.q_star - base).abs()[act]
+      out["max_step"] = max(out["max_step"], float(d.max()))
+      out["raw"] = max(out["raw"], float((t.raw_action - ac).abs()[act].max()))
+      o = obs["actor"][:, 36:48]
+      out["obs"] = max(out["obs"], float((o - t.raw_action).abs()[act].max()))
+    out["entries"] += int(entry.sum())
+    prev = t.q_star.clone()
+  env.close()
+  return out
+
+
+def t33_rate_limiter(_):
+  """Training limiter (task cfg) and evaluation wrapper both equal the reference
+  q*_t = q*_prev + clip(clip(q_cmd) - q*_prev, +-0.3) at every step, initialized from
+  the clipped measured pose in the passive window / first actuated step, per env
+  across a forced reset; raw action and last_action unchanged."""
+  from minipi_getup.ftsr_ref.config import LIMIT_TASK
+
+  res = {
+    "cfg": _rate_limiter_case(LIMIT_TASK, wrap=False),
+    "wrapper": _rate_limiter_case(REC_STATELESS, wrap=True),
+  }
+  ok = all(
+    r["mismatch"] == 0.0
+    and r["max_step"] <= 0.3 + 1e-6
+    and r["entries"] == 10  # 8 envs + 2 re-entries after the forced reset
+    and r["raw"] == 0.0
+    and r["obs"] == 0.0
+    for r in res.values()
+  )
+  return ok, str(res)
+
+
+def t34_limiter_config(_):
+  """Limiter disabled by default; the limiter task differs from the stateless task
+  only in the limiter (train and play) and the evaluation schedule; evaluating it
+  with the wrapper as well is refused (no double application)."""
+  import argparse as ap_
+
+  from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+
+  from minipi_getup.ftsr_ref import limiter_eval
+  from minipi_getup.ftsr_ref.config import LIMIT_TASK
+
+  checks = {}
+  for task in (WALK, REC, REC_STATELESS):
+    for play in (False, True):
+      lim = load_env_cfg(task, play=play).actions["joint_pos"].target_rate_limit
+      checks[f"{task[15:]} play={play} disabled"] = lim == 0.0
+  for play in (False, True):
+    a = copy.deepcopy(load_env_cfg(LIMIT_TASK, play=play))
+    b = load_env_cfg(REC_STATELESS, play=play)
+    checks[f"limit task play={play} = 0.3"] = (
+      a.actions["joint_pos"].target_rate_limit == 0.3
+    )
+    a.actions["joint_pos"].target_rate_limit = 0.0
+    # repr up to object addresses (each cfg build creates new robot-spec lambdas)
+    same = re.sub(r" at 0x[0-9a-f]+", "", repr(a)) == re.sub(
+      r" at 0x[0-9a-f]+", "", repr(b)
+    )
+    checks[f"limit task play={play} otherwise identical"] = same
+  ra, rb = load_rl_cfg(LIMIT_TASK), copy.deepcopy(load_rl_cfg(REC_STATELESS))
+  checks["eval schedule"] = ra.eval_every == 250 and ra.eval_task == LIMIT_TASK
+  rb.eval_every, rb.eval_at, rb.eval_task = ra.eval_every, ra.eval_at, ra.eval_task
+  checks["rl cfg otherwise identical"] = repr(ra) == repr(rb)
+  args = ap_.Namespace(
+    task=LIMIT_TASK, limit=0.3, checkpoint="", seed=2150, per_pose=1, steps=1
+  )
+  try:
+    limiter_eval.rollout(args)
+    checks["double application refused"] = False
+  except SystemExit:
+    checks["double application refused"] = True
+  except Exception:
+    checks["double application refused"] = False
+  return all(checks.values()), str(checks)
+
+
 TESTS = [
   (1, "joint order = deploy order", t01_joint_order),
   (2, "joint signs / default pose", t02_signs_default),
@@ -1360,6 +1472,8 @@ TESTS = [
   (30, "physics explosion: source sanitation and reset", t30_explosion_source),
   (31, "invalid samples in storage (second guard)", t31_invalid_storage),
   (32, "PPO identical on finite rollouts, invalid excluded", t32_ppo_identity),
+  (33, "target-rate limiter: training = evaluation = reference", t33_rate_limiter),
+  (34, "limiter config: default off, single application", t34_limiter_config),
 ]
 
 

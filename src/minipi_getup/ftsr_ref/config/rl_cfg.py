@@ -71,6 +71,16 @@ def recovery_runner_cfg() -> FtsrRunnerCfg:
   )
 
 
+def recovery_limiter_runner_cfg(task: str) -> FtsrRunnerCfg:
+  """Limiter fine-tune: periodic no-assist evaluation of ``task`` (whose play cfg
+  carries the same limiter) every 250 iterations; otherwise unchanged."""
+  cfg = recovery_runner_cfg()
+  cfg.eval_every = 250
+  cfg.eval_at = ()
+  cfg.eval_task = task
+  return cfg
+
+
 def walk_runner_cfg() -> FtsrRunnerCfg:
   cfg = recovery_runner_cfg()
   cfg.experiment_name = "minipi_ftsr_ref_walk"

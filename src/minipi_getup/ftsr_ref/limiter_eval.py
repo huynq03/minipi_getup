@@ -56,7 +56,7 @@ from minipi_getup.ftsr_ref.evaluate import (
   build_env,
 )
 from minipi_getup.ftsr_ref.export import load_model
-from minipi_getup.ftsr_ref.mdp.actions import INVALID_KEY
+from minipi_getup.ftsr_ref.mdp.actions import INVALID_KEY, rate_limit_target
 from minipi_getup.ftsr_ref.mdp.resets import FALLEN_POSE_NAMES, POSE_KEY
 from minipi_getup.ftsr_ref.rl.modules import StudentPolicy
 
@@ -78,8 +78,10 @@ BIG_F = 10.0  # body weights, "large contact impulse" (root constraint force)
 # Rollout
 
 
-def _install_limiter(t, robot, lim: float, check: dict) -> None:
-  """Wrap ``t.process_actions`` with the per-joint target-rate limiter."""
+def _install_limiter(t, robot, lim: float) -> None:
+  """Wrap ``t.process_actions`` with the per-joint target-rate limiter (for a task
+  whose cfg has no limiter). Same function and initialization as the training
+  implementation (``FtsrActionCfg.target_rate_limit``)."""
   orig = t.process_actions
   prev = {"q": None}
 
@@ -90,30 +92,20 @@ def _install_limiter(t, robot, lim: float, check: dict) -> None:
     entry = t.entered & ~was
     reinit = (t.passive | entry).unsqueeze(-1)
     base = q_meas if prev["q"] is None else torch.where(reinit, q_meas, prev["q"])
-    q_clip = t.q_star  # = clip(q_cmd, q_min, q_max) for actuated envs
-    t.q_star = base + torch.clamp(q_clip - base, -lim, lim)
+    t.rate_base = base
+    t.q_star = rate_limit_target(t.q_star, base, lim)
     prev["q"] = t.q_star.clone()
-    # Verification (every policy step).
-    act = ~t.passive
-    if act.any():
-      d = (t.q_star - base).abs()[act]
-      check["max_step"] = max(check["max_step"], float(d.max()))
-      check["clipped"] += int(((q_clip - base).abs()[act] > lim + 1e-7).sum())
-      check["joint_steps"] += int(d.numel())
-      inside = (t.q_star >= t.q_min - 1e-6) & (t.q_star <= t.q_max + 1e-6)
-      check["outside_range"] += int((~inside[act]).sum())
-    if entry.any():
-      e = (t.q_star - q_meas).abs()[entry]
-      check["entry_max_from_measured"] = max(
-        check["entry_max_from_measured"], float(e.max())
-      )
-      check["entry_envs"] += int(entry.sum())
 
   t.process_actions = limited
 
 
 def rollout(args) -> None:
+  from mjlab.tasks.registry import load_env_cfg
+
   t0 = time.time()
+  if load_env_cfg(args.task, play=True).actions["joint_pos"].target_rate_limit > 0:
+    if args.limit > 0.0:
+      raise SystemExit(f"{args.task} already applies a limiter; --limit must be 0")
   model = load_model(args.checkpoint).to(DEV)
   npose = len(FALLEN_POSE_NAMES)
   n = args.per_pose * npose
@@ -123,7 +115,7 @@ def rollout(args) -> None:
     cfg.seed = args.seed
 
   torch.manual_seed(args.seed)
-  env = build_env(TASK, n, mutate)
+  env = build_env(args.task, n, mutate)
   t = env.action_manager.get_term("joint_pos")
   robot = env.scene["robot"]
   data = env.sim.data
@@ -189,8 +181,17 @@ def rollout(args) -> None:
     state["j"] = j + 1
 
   env.sim.step = hooked
+  cfg_lim = float(t.cfg.target_rate_limit)
+  if cfg_lim > 0.0 and args.limit > 0.0:
+    raise SystemExit(
+      f"{args.task} already applies a {cfg_lim} rad/step limiter; --limit must be 0"
+    )
+  lim = cfg_lim if cfg_lim > 0.0 else float(args.limit)
+  source = "task cfg" if cfg_lim > 0.0 else ("eval wrapper" if lim > 0.0 else None)
   check = {
-    "limit_rad_per_step": args.limit,
+    "limit_rad_per_step": lim,
+    "limit_source": source,
+    "entry_base_mismatch_max": 0.0,
     "max_step": 0.0,
     "clipped": 0,
     "joint_steps": 0,
@@ -199,8 +200,8 @@ def rollout(args) -> None:
     "entry_envs": 0,
     "raw_action_mismatch_max": 0.0,
   }
-  if args.limit > 0.0:
-    _install_limiter(t, robot, float(args.limit), check)
+  if source == "eval wrapper":
+    _install_limiter(t, robot, lim)
   policy = StudentPolicy(model).to(DEV).eval()
   obs = env.get_observations()
   tm = env.termination_manager
@@ -208,9 +209,31 @@ def rollout(args) -> None:
   with torch.no_grad():
     for k in range(T):
       a = policy(obs["policy"])
+      was = t.entered.clone()
+      q_before = torch.clamp(robot.data.joint_pos[:, t._ids], qmin, qmax)
       state["j"] = 0
       obs, *_ = env.step(a)
       assert state["j"] == dec
+      if lim > 0.0:
+        # Limiter verification at every policy step (either implementation).
+        act = ~t.passive
+        entry = t.entered & ~was
+        if act.any():
+          d = (t.q_star - t.rate_base).abs()[act]
+          check["max_step"] = max(check["max_step"], float(d.max()))
+          over = (t.q_cmd - t.rate_base).abs()[act] > lim + 1e-7
+          check["clipped"] += int(over.sum())
+          check["joint_steps"] += int(d.numel())
+          inside = (t.q_star >= qmin - 1e-6) & (t.q_star <= qmax + 1e-6)
+          check["outside_range"] += int((~inside[act]).sum())
+        if entry.any():
+          e = (t.q_star - q_before).abs()[entry]
+          check["entry_max_from_measured"] = max(
+            check["entry_max_from_measured"], float(e.max())
+          )
+          bm = float((t.rate_base - q_before).abs()[entry].max())
+          check["entry_base_mismatch_max"] = max(check["entry_base_mismatch_max"], bm)
+          check["entry_envs"] += int(entry.sum())
       # The limiter must not change the raw action seen by the observation.
       ac = torch.clamp(a, -t.cfg.raw_clip, t.cfg.raw_clip)
       act = ~t.passive
@@ -243,9 +266,10 @@ def rollout(args) -> None:
       for key in ("q", "qd", "tau"):
         trace[key][s] = g[key][:, tr_t].cpu().numpy()
       trace["h"][s] = g["h"][:, tr_t].cpu().numpy()
-  if args.limit > 0.0:
-    assert check["max_step"] <= args.limit + 1e-5, check
-    assert check["entry_max_from_measured"] <= args.limit + 1e-5, check
+  if lim > 0.0:
+    assert check["max_step"] <= lim + 1e-5, check
+    assert check["entry_max_from_measured"] <= lim + 1e-5, check
+    assert check["entry_base_mismatch_max"] == 0.0, check
   assert check["raw_action_mismatch_max"] == 0.0, check
   t_roll = time.time() - t0
 
@@ -258,9 +282,10 @@ def rollout(args) -> None:
     "checkpoint": ckpt,
     "checkpoint_sha256": sha,
     "iteration": int(torch.load(ckpt, map_location="cpu", weights_only=False)["iter"]),
-    "limit_rad_per_step": args.limit,
-    "config": "limited" if args.limit > 0 else "baseline",
-    "task": TASK,
+    "limit_rad_per_step": lim,
+    "limit_source": source,
+    "config": "limited" if lim > 0 else "baseline",
+    "task": args.task,
     "seed": args.seed,
     "per_pose": args.per_pose,
     "num_envs": n,
@@ -1008,6 +1033,9 @@ def main() -> None:
   r.add_argument("--checkpoint", required=True)
   r.add_argument("--out", required=True)
   r.add_argument("--limit", type=float, default=0.0)
+  r.add_argument(
+    "--task", default=TASK, help="a task with a cfg limiter needs --limit 0"
+  )
   r.add_argument("--seed", type=int, default=2150)
   r.add_argument("--per-pose", type=int, default=128)
   r.add_argument("--trace-per-pose", type=int, default=2)

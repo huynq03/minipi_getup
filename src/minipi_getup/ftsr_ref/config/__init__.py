@@ -3,7 +3,11 @@
 from mjlab.tasks.registry import register_mjlab_task
 
 from minipi_getup.ftsr_ref.config.env_cfg import recovery_env_cfg, walk_env_cfg
-from minipi_getup.ftsr_ref.config.rl_cfg import recovery_runner_cfg, walk_runner_cfg
+from minipi_getup.ftsr_ref.config.rl_cfg import (
+  recovery_limiter_runner_cfg,
+  recovery_runner_cfg,
+  walk_runner_cfg,
+)
 from minipi_getup.ftsr_ref.rl.runner import FtsrRunner
 
 register_mjlab_task(
@@ -29,5 +33,17 @@ register_mjlab_task(
   env_cfg=recovery_env_cfg(monotonic=False),
   play_env_cfg=recovery_env_cfg(play=True, monotonic=False),
   rl_cfg=recovery_runner_cfg(),
+  runner_cls=FtsrRunner,
+)
+
+# Limiter fine-tune: the stateless task with a 0.3 rad / policy-step PD-target rate
+# limiter in both the training and the play cfg (evaluation applies it once, via the
+# cfg). Otherwise identical to Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless.
+LIMIT_TASK = "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3"
+register_mjlab_task(
+  task_id=LIMIT_TASK,
+  env_cfg=recovery_env_cfg(monotonic=False, target_rate_limit=0.3),
+  play_env_cfg=recovery_env_cfg(play=True, monotonic=False, target_rate_limit=0.3),
+  rl_cfg=recovery_limiter_runner_cfg(LIMIT_TASK),
   runner_cls=FtsrRunner,
 )
