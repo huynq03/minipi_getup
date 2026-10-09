@@ -175,3 +175,38 @@ episode rewards after resume are from short episodes. New run dir
 best record (model_2500) and evaluations; evaluations at 2750, 3000, 3500, then every
 500. Unchanged: plant, torque cap, qd penalty, rewards, stage thresholds, PPO, assist
 schedule.
+
+### Resumed run finished (iteration 8000, 2026-10-09 14:06)
+
+Numerically stable to the end: one explosion in 5300 iterations (it 4540, 1 env,
+resting at h 0.16 m with qd about 0, no non-finite cost, no skipped minibatch), far
+below the stop rule. Final training line: reward 83.3, S1/S2 0.88/0.88, mse 1.59,
+policy std 3.04.
+
+Periodic no-assist evaluations (same protocol as above; time = median start of the
+first 1 s held above h1 and upright, after the passive window):
+
+| it | recovered mean | supine | prone | left | right | time S/P/L/R (s) | qd p99 | qd max | std |
+|---|---|---|---|---|---|---|---|---|---|
+| 2750 | 96.5 % | | | | | | | | 1.34 |
+| 3000 | 99.6 % | 100 | 100 | 98.4 | 100 | 0.53 / 1.18 / 0.60 / 0.55 | 10.6-19.3 | 46.9 | 1.42 |
+| 3500 | 97.3 % | 95.3 | 95.3 | 98.4 | 100 | 0.42 / 1.02 / 0.36 / 0.42 | 12.4-17.1 | 45.3 | 1.58 |
+| 4000 | 100 % | 100 | 100 | 100 | 100 | 0.32 / 0.40 / 0.36 / 0.32 | 9.5-12.4 | 46.1 | 1.75 |
+| 4500 | 100 % | 100 | 100 | 100 | 100 | 0.30 / 0.24 / 0.33 / 0.34 | 11.6-12.5 | 45.4 | 1.91 |
+| 5000 | 100 % | 100 | 100 | 100 | 100 | 0.28 / 0.18 / 0.34 / 0.30 | 9.9-11.6 | 44.2 | 2.07 |
+| 5500 | 99.2 % | 98.4 | 98.4 | 100 | 100 | 0.30 / 0.48 / 0.35 / 0.41 | 11.5-14.9 | 47.4 | 2.23 |
+| 6000 | 96.1 % | 100 | 95.3 | 98.4 | 90.6 | 0.28 / 0.18 / 0.28 / 0.29 | 10.2-12.1 | 42.5 | 2.40 |
+| 6500 | 94.5 % | 98.4 | 93.8 | 92.2 | 93.8 | 0.28 / 0.36 / 0.30 / 0.30 | 11.3-15.4 | 46.7 | 2.56 |
+| 7000 | **54.3 %** | 64.1 | 48.4 | 57.8 | 46.9 | 0.30 / 0.54 / 0.40 / 0.49 | 12.1-14.2 | 52.2 | 2.73 |
+| 7500 | 99.6 % | 98.4 | 100 | 100 | 100 | 0.28 / 0.44 / 0.28 / 0.33 | 11.1-11.9 | 50.6 | 2.88 |
+| 8000 | 100 % | 100 | 100 | 100 | 100 | 0.35 / 0.41 / 0.40 / 0.33 | 11.1-12.8 | 46.3 | 3.04 |
+
+- Failures from 6000 to 7000 are high-but-tilted, reached-h1-not-held and
+  fell-after-recovery, not failures to lift. The 7000 collapse recovered by 7500.
+- The policy std rose monotonically (1.42 to 3.04) and the student MSE from 0.45 to
+  1.59; the deterministic evaluations are unaffected, but the 7000 dip shows the
+  late policy is less stable between checkpoints.
+- Get-up time reached its floor (about 0.3-0.4 s) by 4000-5000; peak joint speed
+  stayed at 42-52 rad/s throughout (see `results/ftsr_velocity_audit/`).
+- `best_recovery_model.pt` = model_4000 (first 100 % in every pose; 4500, 5000 and
+  8000 tie it). Not hardware-verified.
