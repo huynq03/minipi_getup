@@ -18,6 +18,11 @@ Per policy step (``process_actions``)::
 
 Per physics step (``apply_actions``): Eq. 4 assistance (``assistance.py``) if
 configured, and the substep monitor (torque, qdot, tracking error).
+
+Non-finite physics (a simulation explosion in one env): the env is flagged in
+``env.extras[INVALID_KEY]`` for the policy step, its wrench and constraint costs are
+set to zero at the source and it is left out of the monitor; mjlab's ``nan``
+termination resets it. Finite envs are bitwise unchanged (``torch.where``).
 """
 
 from __future__ import annotations
@@ -43,6 +48,11 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 COST_KEY = "ftsr_constraint_cost"
+# Per-env bool: the physics state, a joint reading or the Eq. 4 wrench was non-finite
+# in some physics step of the current policy step.
+INVALID_KEY = "ftsr_invalid_env"
+# Per-env max finite |qdot| over the current policy step (diagnostics of explosions).
+QD_STEP_MAX_KEY = "ftsr_qd_step_max"
 
 
 @requires_model_fields("actuator_gainprm", "actuator_biasprm")
@@ -211,6 +221,10 @@ class FtsrAction(ActionTerm):
     self.torque = torch.zeros(n, 3, device=dev)
     self._cost = torch.zeros(n, 2, device=dev)
     env.extras[COST_KEY] = self._cost
+    self._invalid = torch.zeros(n, dtype=torch.bool, device=dev)
+    self._qd_step_max = torch.zeros(n, device=dev)
+    env.extras[INVALID_KEY] = self._invalid
+    env.extras[QD_STEP_MAX_KEY] = self._qd_step_max
     self._substeps = 0
     self.t_coeff = 0.0
     # Host-side assist state (no GPU reads in the physics loop): ``_assist_live``
@@ -291,6 +305,8 @@ class FtsrAction(ActionTerm):
     self._write_gains()
 
     self._cost.zero_()
+    self._invalid.zero_()
+    self._qd_step_max.zero_()
     self._substeps = 0
     a_cfg = self.cfg.assist
     if a_cfg is not None:
@@ -304,10 +320,28 @@ class FtsrAction(ActionTerm):
     qd = data.joint_vel[:, self._ids]
     q = data.joint_pos[:, self._ids]
 
+    # Envs whose physics state went non-finite are flagged and kept out of the
+    # monitor and the assistance (identity for finite rows).
+    ok = torch.isfinite(q).all(-1) & torch.isfinite(qd).all(-1)
+    torch.maximum(
+      self._qd_step_max,
+      torch.nan_to_num(qd.abs(), nan=0.0, posinf=0.0).amax(-1),
+      out=self._qd_step_max,
+    )
     if self._substeps > 0:
       # Results of the previous physics step of this policy step.
       tau = data.qfrc_actuator[:, self._ids]
-      self.monitor.add(tau, qd, self.q_star - q, self._act_f)
+      ok_tau = ok & torch.isfinite(tau).all(-1)
+      self._invalid |= ~ok_tau
+      okc = ok_tau.unsqueeze(-1)
+      self.monitor.add(
+        torch.where(okc, tau, 0.0),
+        torch.where(okc, qd, 0.0),
+        torch.where(okc, self.q_star - q, 0.0),
+        self._act_f * okc,
+      )
+    else:
+      self._invalid |= ~ok
 
     self._entity.set_joint_position_target(self.q_star, joint_ids=self._ids)
 
@@ -318,12 +352,21 @@ class FtsrAction(ActionTerm):
         h = data.body_link_pos_w[:, self._base[0], 2]
         quat = data.body_link_quat_w[:, self._base[0]]
         f, t = eq4_wrench(h, quat, stage.h_cmd, self.t_coeff, a_cfg)
-        self.force, self.torque = f * self._act_f, t * self._act_f
+        f, t = f * self._act_f, t * self._act_f
+        # Source sanitation: a non-finite base state gives a non-finite wrench; such
+        # an env gets no wrench and zero cost (and is flagged invalid).
+        w_ok = torch.isfinite(f).all(-1) & torch.isfinite(t).all(-1)
+        self._invalid |= ~w_ok
+        self.force = torch.where(w_ok.unsqueeze(-1), f, 0.0)
+        self.torque = torch.where(w_ok.unsqueeze(-1), t, 0.0)
         # Normalized constraint costs (Eq. 5-8 units: F / F_max, T / (T_max pi)),
         # averaged over the policy step's physics steps.
         d = float(env.cfg.decimation)
         self._cost[:, 0] += self.force.norm(dim=-1) / a_cfg.f_max / d
         self._cost[:, 1] += self.torque.norm(dim=-1) / (a_cfg.t_max * torch.pi) / d
+        # An invalid env's sample carries no cost (also the substeps before the
+        # explosion); finite envs are untouched.
+        self._cost.masked_fill_(self._invalid.unsqueeze(-1), 0.0)
       else:
         # t >= t_tag: clear the wrench once; costs stay exactly zero.
         self.force.zero_()

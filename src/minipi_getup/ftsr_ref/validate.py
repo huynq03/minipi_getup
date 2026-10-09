@@ -1042,6 +1042,266 @@ def t29_nonfinite_guard(_):
   )
 
 
+PRE_FIX_COMMIT = "36c1bc6"  # last commit before the explosion fix (reference code)
+
+
+def _pre_fix_module(rel: str, name: str):
+  """The module ``rel`` as of PRE_FIX_COMMIT (reference for bitwise identity)."""
+  import importlib.util
+  import subprocess
+
+  repo = os.path.dirname(os.path.abspath(__file__))
+  src = subprocess.run(
+    ["git", "-C", repo, "show", f"{PRE_FIX_COMMIT}:src/minipi_getup/ftsr_ref/{rel}"],
+    capture_output=True,
+    text=True,
+    check=True,
+  ).stdout
+  path = os.path.join(tempfile.mkdtemp(), f"{name}.py")
+  with open(path, "w") as f:
+    f.write(src)
+  spec = importlib.util.spec_from_file_location(name, path)
+  mod = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(mod)
+  return mod
+
+
+def t30_explosion_source(_):
+  """A non-finite physics state in one env: flagged invalid, zero wrench and cost at
+  the source, nan-terminated and reset. Finite envs: the sanitation is an identity
+  (``torch.where`` / ``masked_fill`` with an all-finite mask, checked bitwise on the
+  clean run's tensors; bitwise PPO identity is test 32). Two separate env instances
+  are not bitwise reproducible on the GPU, so the twin comparison of envs 1-7 is
+  reported against the clean-vs-clean difference, not required to be 0."""
+  from minipi_getup.ftsr_ref.mdp.actions import INVALID_KEY
+
+  n = 8
+
+  def run(poison: bool):
+    torch.manual_seed(0)
+    env = make_env(REC_STATELESS, n)
+    term_ = env.action_manager.get_term("joint_pos")
+    a = torch.zeros(n, 12, device=DEV)
+    for _ in range(105):  # past the 2 s passive window: assistance active
+      env.step(a)
+    if poison:
+      env.sim.data.qpos[0, 2] = float("nan")
+    _, _, terminated, _, extras = env.step(a)
+    out = {
+      "cost": env.extras[COST_KEY].clone(),
+      "invalid": env.extras[INVALID_KEY].clone(),
+      "force": term_.force.clone(),
+      "nan_term": env.termination_manager.get_term("nan").clone(),
+      "terminated": terminated.clone(),
+      "obs_finite": all(
+        bool(torch.isfinite(v).all())
+        for v in env.observation_manager.compute().values()
+      ),
+    }
+    env.step(a)
+    out["invalid_next"] = env.extras[INVALID_KEY].clone()
+    out["qpos_finite_next"] = bool(torch.isfinite(env.sim.data.qpos).all())
+    out["monitor"] = term_.monitor.summary(term_.joint_names)
+    env.close()
+    return out
+
+  p, c, c2 = run(True), run(False), run(False)
+  noise = float((c["cost"] - c2["cost"]).abs().max())
+  diff = float((p["cost"][1:] - c["cost"][1:]).abs().max())
+  okm = ~c["invalid"].unsqueeze(-1)
+  ident = torch.equal(torch.where(okm, c["force"], 0.0), c["force"]) and torch.equal(
+    c["cost"].masked_fill(c["invalid"].unsqueeze(-1), 0.0), c["cost"]
+  )
+  mon_ok = all(math.isfinite(v) for v in p["monitor"].values() if isinstance(v, float))
+  ok = (
+    bool(p["invalid"][0])
+    and not bool(p["invalid"][1:].any())
+    and not bool(c["invalid"].any())
+    and bool(torch.isfinite(p["cost"]).all())
+    and bool((p["cost"][0] == 0).all())
+    and bool((c["cost"][:, 0] > 0).all())
+    and bool(torch.isfinite(p["force"]).all())
+    and bool(p["nan_term"][0])
+    and bool(p["terminated"][0])
+    and p["obs_finite"]
+    and not bool(p["invalid_next"].any())
+    and p["qpos_finite_next"]
+    and mon_ok
+    and ident
+    and diff <= 10.0 * max(noise, 1e-6)
+  )
+  return ok, (
+    f"poisoned env 0: invalid {bool(p['invalid'][0])}, cost {p['cost'][0].tolist()}, "
+    f"nan-terminated {bool(p['nan_term'][0])}, obs finite {p['obs_finite']}, valid "
+    f"again next step {not bool(p['invalid_next'].any())}; monitor finite {mon_ok}; "
+    f"sanitation identity on finite envs {ident}; envs 1-7 vs clean twin max |diff| "
+    f"{diff:.1e} (clean vs clean {noise:.1e}; clean cost min "
+    f"{float(c['cost'][:, 0].min()):.3f})"
+  )
+
+
+def t31_invalid_storage(_):
+  """Storage: all-valid rollouts give bitwise the pre-fix returns / advantages (with
+  and without Eq. 8); an invalid sample with NaN reward and cost gives finite
+  advantages, advantage 0 there, and results independent of its contents."""
+  old = _pre_fix_module("rl/storage.py", "_ftsr_storage_prefix")
+  T, N = 24, 64
+  g = torch.Generator(device="cpu").manual_seed(3)
+
+  def rnd(*shape):
+    return torch.randn(*shape, generator=g).to(DEV)
+
+  rew, val, costs = rnd(T, N), rnd(T, N), rnd(T, N, 2).abs()
+  dones = (torch.rand(T, N, generator=g) < 0.05).float().to(DEV)
+  last = rnd(N)
+  betas = (0.001, 0.001)
+
+  def new_compute(rew, costs, cons, valid=None):
+    st = RolloutStorage(T, N, {"actor": 1}, 1, 1, 2, DEV)
+    st.rewards, st.values, st.costs, st.dones = (
+      rew.clone(),
+      val.clone(),
+      costs.clone(),
+      dones.clone(),
+    )
+    if valid is not None:
+      st.valid = valid.clone()
+    info = st.compute(last, 0.99, 0.95, betas, cons, "cost_return", True)
+    return st.returns, st.advantages, info
+
+  ident = []
+  for cons in (True, False):
+    ret_n, adv_n, _ = new_compute(rew, costs, cons)
+    ret_o, adv_r = old.gae(rew, val, last, dones, 0.99, 0.95)
+    if cons:
+      adv_o, _ = old.mixed_advantage(
+        adv_r, costs, dones, 0.99, 0.95, betas, "cost_return", True
+      )
+    else:
+      adv_o = old.standardize(adv_r)
+    ident.append(torch.equal(ret_n, ret_o) and torch.equal(adv_n, adv_o))
+
+  t0, k = 10, 3
+  valid = torch.ones(T, N, dtype=torch.bool, device=DEV)
+  valid[t0, k] = False
+  r1, c1 = rew.clone(), costs.clone()
+  r1[t0, k], c1[t0, k] = float("nan"), float("nan")  # explosion: flagged by guard 2
+  _, adv1, info1 = new_compute(r1, c1, True)
+  r2, c2 = rew.clone(), costs.clone()
+  r2[t0, k], c2[t0, k] = 123.0, 45.0  # any contents, flagged by the runner
+  _, adv2, info2 = new_compute(r2, c2, True, valid)
+  # Other envs: unstandardized reward GAE unchanged; env k truncated at t0.
+  _, a_masked = gae(rew, val, last, dones, 0.99, 0.95, valid)
+  _, a_plain = gae(rew, val, last, dones, 0.99, 0.95)
+  others = torch.arange(N, device=DEV) != k
+  ok = (
+    all(ident)
+    and bool(torch.isfinite(adv1).all())
+    and float(adv1[t0, k]) == 0.0
+    and torch.equal(adv1, adv2)
+    and info1["invalid_samples"] == 1.0
+    and info1["nonfinite_cost_samples"] == 1.0
+    and torch.equal(a_masked[:, others], a_plain[:, others])
+    and torch.equal(a_masked[t0 + 1 :, k], a_plain[t0 + 1 :, k])
+  )
+  return ok, (
+    f"all valid = pre-fix ({PRE_FIX_COMMIT}) bitwise: Eq. 8 {ident[0]}, plain "
+    f"{ident[1]}; NaN sample -> advantages finite {bool(torch.isfinite(adv1).all())}, "
+    f"A = {float(adv1[t0, k])} there, independent of its contents "
+    f"{torch.equal(adv1, adv2)}, guard counts {info1['invalid_samples']:.0f} / "
+    f"{info1['nonfinite_cost_samples']:.0f}"
+  )
+
+
+def t32_ppo_identity(_):
+  """PPO: on an all-valid rollout the update equals the pre-fix ``_update`` bitwise;
+  with an invalid sample the update is finite and independent of its contents."""
+  from dataclasses import asdict
+
+  from mjlab.rl import RslRlVecEnvWrapper
+
+  from minipi_getup.ftsr_ref.config.rl_cfg import recovery_runner_cfg
+  from minipi_getup.ftsr_ref.rl.runner import FtsrRunner
+
+  old = _pre_fix_module("rl/runner.py", "_ftsr_runner_prefix")
+  cfg = asdict(recovery_runner_cfg())
+  cfg["eval_at"], cfg["eval_every"] = (), 0
+  n = 32
+  env = RslRlVecEnvWrapper(make_env(REC_STATELESS, n))
+  r = FtsrRunner(env, cfg, None, DEV)
+  st = r.storage
+  obs = env.get_observations()
+  g = torch.Generator(device="cpu").manual_seed(5)
+  with torch.inference_mode():
+    for _ in range(cfg["num_steps_per_env"]):
+      z_t, z_s, mean, std, value = r.act(obs)
+      a = mean + std * torch.randn(mean.shape, generator=g).to(DEV)
+      step_obs = {k: obs[k] for k in ("actor", "policy", "teacher", "critic")}
+      obs, rew, dones, _ = env.step(a)
+      st.add(
+        step_obs,
+        z_t=z_t,
+        z_s=z_s,
+        actions=a,
+        log_prob=torch.distributions.Normal(mean, std).log_prob(a).sum(-1),
+        mu=mean,
+        sigma=std,
+        rewards=rew,
+        costs=torch.rand(n, 2, generator=g).to(DEV),
+        dones=dones.float(),
+        values=value,
+      )
+    lv = r.model.value(r.model.teacher_encoder(obs["teacher"]), obs["critic"])
+  env.close()
+  raw = {k: getattr(st, k).clone() for k in ("rewards", "costs", "values")}
+  model0 = copy.deepcopy(r.model.state_dict())
+  opt0 = copy.deepcopy(r.optimizer.state_dict())
+  lr0 = r.lr
+  rng0 = (torch.get_rng_state(), torch.cuda.get_rng_state_all())
+
+  def run(update, poison=None):
+    for k_, v in raw.items():
+      setattr(st, k_, v.clone())
+    st.valid.fill_(True)
+    if poison is not None:
+      poison()
+    st.compute(lv.clone(), 0.99, 0.95, (0.001, 0.001), True, "cost_return", True)
+    r.model.load_state_dict(model0)
+    r.optimizer.load_state_dict(copy.deepcopy(opt0))
+    r.lr = lr0
+    for grp in r.optimizer.param_groups:
+      grp["lr"] = lr0
+    torch.set_rng_state(rng0[0])
+    torch.cuda.set_rng_state_all(rng0[1])
+    update(r)
+    return {k_: p.detach().clone() for k_, p in r.model.named_parameters()}, r.lr
+
+  pa, lra = run(FtsrRunner._update)
+  pb, lrb = run(old.FtsrRunner._update)
+  same = lra == lrb and all(torch.equal(pa[k_], pb[k_]) for k_ in pa)
+
+  def poison_nan():
+    st.rewards[5, 2] = float("nan")
+    st.costs[5, 2] = float("nan")
+
+  def poison_garbage():
+    st.valid[5, 2] = False
+    st.rewards[5, 2] = 7.0
+    st.costs[5, 2] = 3.0
+
+  pc, _ = run(FtsrRunner._update, poison_nan)
+  pd, _ = run(FtsrRunner._update, poison_garbage)
+  finite = all(bool(torch.isfinite(v).all()) for v in pc.values())
+  indep = all(torch.equal(pc[k_], pd[k_]) for k_ in pc)
+  changed = any(not torch.equal(pc[k_], model0[k_]) for k_ in pc if k_ in model0)
+  ok = same and finite and indep and changed
+  return ok, (
+    f"all-valid update = pre-fix ({PRE_FIX_COMMIT}) _update bitwise {same} (lr "
+    f"{lra:.2e} / {lrb:.2e}); invalid sample: parameters finite {finite}, updated "
+    f"{changed}, independent of its contents {indep}"
+  )
+
+
 def t25_onnx(_):
   from minipi_getup.ftsr_ref.export import export_onnx, onnx_parity
   from minipi_getup.ftsr_ref.rl.modules import FtsrModel
@@ -1097,6 +1357,9 @@ TESTS = [
   (27, "stage persists in checkpoints", t27_stage_checkpoint),
   (28, "training task keeps the v2 method", t28_stateless_v2_config),
   (29, "non-finite PPO guard", t29_nonfinite_guard),
+  (30, "physics explosion: source sanitation and reset", t30_explosion_source),
+  (31, "invalid samples in storage (second guard)", t31_invalid_storage),
+  (32, "PPO identical on finite rollouts, invalid excluded", t32_ppo_identity),
 ]
 
 

@@ -18,6 +18,13 @@ Per iteration:
 5. Student encoder: MSE(E^s(o), E^t(x).detach()) on all samples, with the updated E^t
    (release EncoderMSE, paper Eq. 10).
 
+Physics explosions (non-finite state in one env): the env is flagged by the action
+term (wrench and costs zeroed at the source) and by mjlab's ``nan`` termination, which
+resets it. Its sample is stored as invalid: the trajectory is truncated there, it gets
+no advantage and no PPO loss weight, and its episode is not counted in the reward
+statistics (``storage.py``). Each occurrence is printed and logged (``Numerics/``);
+frequent explosions stop training (``explosion_*``).
+
 Checkpoints hold everything needed to continue: networks, both optimizers, adaptive
 learning rate, iteration, env step counter (assist schedule) and RNG states. The stage
 is stateless (recomputed from the population).
@@ -37,7 +44,7 @@ import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
-from minipi_getup.ftsr_ref.mdp.actions import COST_KEY
+from minipi_getup.ftsr_ref.mdp.actions import COST_KEY, INVALID_KEY, QD_STEP_MAX_KEY
 from minipi_getup.ftsr_ref.mdp.stages import STAGE_KEY
 from minipi_getup.ftsr_ref.rl.modules import FtsrModel, StudentPolicy
 from minipi_getup.ftsr_ref.rl.storage import RolloutStorage
@@ -178,6 +185,23 @@ class FtsrRunner:
     end = start + num_learning_iterations
 
     T = cfg["num_steps_per_env"]
+    tm = unwrapped.termination_manager
+    if "nan" in tm.active_terms:
+
+      def nan_term():
+        return tm.get_term("nan")
+    else:
+      zero = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+      def nan_term():
+        return zero
+
+    robot = unwrapped.scene["robot"]
+
+    def base_h():  # base height before the step (diagnostics of explosions)
+      return robot.data.root_link_pos_w[:, 2].clone()
+
+    h_before = base_h()
     for it in range(start, end):
       t0 = time.time()
       self.model.train()
@@ -189,6 +213,9 @@ class FtsrRunner:
       done_mask = torch.zeros(T, self.num_envs, dtype=torch.bool, device=self.device)
       done_rew = torch.zeros(T, self.num_envs, device=self.device)
       done_len = torch.zeros(T, self.num_envs, device=self.device)
+      inv_any = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+      inv_qd = torch.zeros(self.num_envs, device=self.device)
+      inv_h = torch.full((self.num_envs,), float("nan"), device=self.device)
       with torch.inference_mode():
         for step in range(T):
           z_t, z_s, mean, std, value = self.act(obs)
@@ -198,6 +225,10 @@ class FtsrRunner:
           obs, rewards, dones, extras = self.env.step(actions)
           obs = obs.to(self.device)
           cost = unwrapped.extras[COST_KEY].clone()
+          inv = unwrapped.extras[INVALID_KEY] | nan_term()
+          inv_any |= inv
+          inv_qd = torch.where(inv, unwrapped.extras[QD_STEP_MAX_KEY], inv_qd)
+          inv_h = torch.where(inv, h_before, inv_h)
           cost_seen |= (cost.abs() > 0.0).any()
           rewards = rewards.clone()
           if "time_outs" in extras:
@@ -214,7 +245,9 @@ class FtsrRunner:
             costs=cost,
             dones=dones.float(),
             values=value,
+            valid=~inv,
           )
+          h_before = base_h()
           items = dict(extras.get("log", {}))
           if action_term.cfg.assist is not None:
             items.update(action_term.log_assist())
@@ -225,7 +258,7 @@ class FtsrRunner:
           cur_rew += rewards
           cur_len += 1
           d = dones > 0
-          done_mask[step] = d
+          done_mask[step] = d & ~inv
           done_rew[step] = cur_rew
           done_len[step] = cur_len
           cur_rew *= ~d
@@ -258,6 +291,7 @@ class FtsrRunner:
       self.current_learning_iteration = it + 1
 
       safety = monitor.summary(action_term.joint_names)
+      self._explosions(it, inv_any, inv_qd, inv_h, adv_info, loss_info)
       self._log(
         it, logs, loss_info, adv_info, safety, rew_buf, len_buf, t_collect, t_learn
       )
@@ -279,6 +313,49 @@ class FtsrRunner:
   # stop training: more than half of an iteration's minibatches skipped, or skips in
   # ``nan_max_consecutive`` consecutive iterations.
   nan_max_consecutive = 3
+  # Physics explosions: stop (and report) when more than ``explosion_max_envs`` envs
+  # explode in one iteration, or explosions occur in more than
+  # ``explosion_max_iters`` of the last ``explosion_window`` iterations.
+  explosion_max_envs = 8
+  explosion_window = 100
+  explosion_max_iters = 5
+
+  def _explosions(self, it, inv_any, inv_qd, inv_h, adv_info, loss_info) -> None:
+    ids = inv_any.nonzero().squeeze(-1)
+    n = int(ids.numel())
+    hist = getattr(self, "_explosion_hist", None)
+    if hist is None:
+      hist = self._explosion_hist = deque(maxlen=self.explosion_window)
+    hist.append(n > 0)
+    qd = inv_qd[ids]
+    rec = {
+      "invalid_envs": float(n),
+      "invalid_samples": adv_info.get("invalid_samples", 0.0),
+      "nonfinite_cost_samples": adv_info.get("nonfinite_cost_samples", 0.0),
+      "invalid_qd_max_before": float(qd.max()) if n else 0.0,
+      "explosion_iters_in_window": float(sum(hist)),
+    }
+    loss_info.update({"numerics_" + k: v for k, v in rec.items()})
+    if n == 0:
+      return
+    info = {
+      "iteration": it,
+      **rec,
+      "env_ids": ids.tolist()[:32],
+      "qd_max_before_per_env": [round(float(x), 2) for x in qd[:32]],
+      "base_height_before_per_env": [round(float(x), 3) for x in inv_h[ids][:32]],
+      "skipped_minibatches": loss_info.get("skipped_minibatches", 0.0),
+    }
+    print(f"[FTSR-Ref] PHYSICS EXPLOSION: {json.dumps(info)}", flush=True)
+    if self.log_dir is not None:
+      with open(os.path.join(self.log_dir, "explosions.jsonl"), "a") as f:
+        f.write(json.dumps(info) + "\n")
+    if n > self.explosion_max_envs or sum(hist) > self.explosion_max_iters:
+      raise RuntimeError(
+        f"frequent physics explosions ({n} envs at iteration {it}; "
+        f"{sum(hist)} of the last {len(hist)} iterations): stopping; see "
+        "explosions.jsonl; last checkpoint is intact"
+      )
 
   def _nonfinite_report(self, it_tag: str, tensors: dict[str, torch.Tensor]) -> None:
     rep = {}
@@ -307,6 +384,7 @@ class FtsrRunner:
     stats: dict[str, float | torch.Tensor] = defaultdict(float)
     n = 0
     skipped, total_mb, reported = 0, 0, False
+    masked = self.storage.has_invalid
     for mb in self.storage.minibatches(
       cfg["num_mini_batches"], cfg["num_learning_epochs"], self.teacher_mask
     ):
@@ -317,8 +395,17 @@ class FtsrRunner:
       std = m.std.clamp(min=1e-4).expand_as(mean)
       dist = torch.distributions.Normal(mean, std)
       log_prob = dist.log_prob(mb["actions"]).sum(-1)
-      entropy = dist.entropy().sum(-1).mean()
       value = m.value(mb["z_t"], mb["obs_critic"])
+      if masked:
+        # Invalid samples (physics explosions) carry no weight.
+        w = mb["valid"]
+        n_w = w.sum().clamp(min=1)
+
+        def avg(x, w=w, n_w=n_w):
+          return torch.where(w, x, 0.0).sum() / n_w
+      else:
+        avg = torch.mean
+      entropy = avg(dist.entropy().sum(-1))
 
       if cfg["schedule"] == "adaptive" and cfg["desired_kl"] > 0:
         with torch.no_grad():
@@ -328,7 +415,8 @@ class FtsrRunner:
             + (old_sigma**2 + (old_mu - mean) ** 2) / (2.0 * std**2)
             - 0.5,
             dim=-1,
-          ).mean()
+          )
+          kl = avg(kl)
           if kl > cfg["desired_kl"] * 2.0:
             self.lr = max(1e-5, self.lr / 1.5)
           elif 0.0 < kl < cfg["desired_kl"] / 2.0:
@@ -339,16 +427,16 @@ class FtsrRunner:
 
       adv = mb["advantages"]
       ratio = torch.exp(log_prob - mb["log_prob"])
-      surrogate = torch.max(
-        -adv * ratio, -adv * torch.clamp(ratio, 1.0 - clip, 1.0 + clip)
-      ).mean()
+      surrogate = avg(
+        torch.max(-adv * ratio, -adv * torch.clamp(ratio, 1.0 - clip, 1.0 + clip))
+      )
       if cfg["use_clipped_value_loss"]:
         v_clip = mb["values"] + (value - mb["values"]).clamp(-clip, clip)
-        value_loss = torch.max(
-          (value - mb["returns"]) ** 2, (v_clip - mb["returns"]) ** 2
-        ).mean()
+        value_loss = avg(
+          torch.max((value - mb["returns"]) ** 2, (v_clip - mb["returns"]) ** 2)
+        )
       else:
-        value_loss = ((value - mb["returns"]) ** 2).mean()
+        value_loss = avg((value - mb["returns"]) ** 2)
       loss = (
         surrogate
         + cfg["value_loss_coef"] * value_loss
@@ -528,7 +616,9 @@ class FtsrRunner:
       f"{safety.get('qd_frac_above_4', 0):.3f} >6.28 "
       f"{safety.get('qd_frac_above_soft', 0):.4f} | mse "
       f"{loss_info.get('student_mse', 0):.4f} std "
-      f"{scalars['Policy/mean_noise_std']:.2f} ({tc:.1f}+{tl:.1f}s)",
+      f"{scalars['Policy/mean_noise_std']:.2f} | inv "
+      f"{loss_info.get('numerics_invalid_envs', 0):.0f} skip "
+      f"{loss_info.get('skipped_minibatches', 0):.0f} ({tc:.1f}+{tl:.1f}s)",
       flush=True,
     )
     terms = self._reward_terms(scalars)
