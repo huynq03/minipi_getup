@@ -1,0 +1,386 @@
+{
+ "purpose": "zero-shot evaluation of a 0.3 rad/policy-step PD-target rate limiter; evaluation only, no training",
+ "git": {
+  "branch": "ftsr-only",
+  "evaluation_code_commit": "8878bbce97e646a357309c773c7185a1f036a254",
+  "training_run_code": "see run dir git_state.txt"
+ },
+ "code": [
+  "src/minipi_getup/ftsr_ref/limiter_eval.py",
+  "tools/ftsr_limiter_eval.sh"
+ ],
+ "checkpoints": {
+  "model_3000": {
+   "path": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3000.pt",
+   "sha256": "5ccf02e11760a2a9cbef1d18a84e63c9a3be4138ff9544c3f4a1cb6678e9464b"
+  },
+  "model_4000": {
+   "path": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4000.pt",
+   "sha256": "408df87e06b9fa49659fd98fb971c18fcc27814c53d5d164e97c4b4e43d20ad3"
+  },
+  "model_5000": {
+   "path": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_5000.pt",
+   "sha256": "7f3f2639fdb6dedb1659d5263029b999a82f54343a1d1c4ca2f23ba495eb9e0a"
+  },
+  "model_8000": {
+   "path": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_8000.pt",
+   "sha256": "98abee41dc827e5bff8cfd955eaed4cf01b66cf373ccd61cbd177939c7a99f5e"
+  }
+ },
+ "seeds_main": [
+  2150,
+  2151,
+  2152
+ ],
+ "seeds_threshold_scan": [
+  2150
+ ],
+ "episodes_per_pose_per_seed": 128,
+ "poses": [
+  "supine",
+  "prone",
+  "left_side",
+  "right_side"
+ ],
+ "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless",
+ "env_cfg": "play (no observation noise), reset_pose by_env_index, seed = eval seed",
+ "assist": null,
+ "policy": "student, deterministic (mean action)",
+ "physics_dt": 0.0005,
+ "decimation": 40,
+ "policy_dt": 0.02,
+ "passive_steps": 100,
+ "episode_steps": 999,
+ "kp": [
+  60.0,
+  40.0,
+  20.0,
+  60.0,
+  30.0,
+  10.0,
+  60.0,
+  40.0,
+  20.0,
+  60.0,
+  30.0,
+  10.0
+ ],
+ "kd": [
+  2.4000000953674316,
+  0.800000011920929,
+  0.4000000059604645,
+  2.799999952316284,
+  1.600000023841858,
+  0.30000001192092896,
+  2.4000000953674316,
+  0.800000011920929,
+  0.4000000059604645,
+  2.799999952316284,
+  1.600000023841858,
+  0.30000001192092896
+ ],
+ "tau_cap": 16.0,
+ "q_min": [
+  -1.25,
+  -0.5,
+  -0.6000000238418579,
+  -0.6499999761581421,
+  -0.5,
+  -0.30000001192092896,
+  -1.25,
+  -0.11999999731779099,
+  -0.30000001192092896,
+  -0.6499999761581421,
+  -0.5,
+  -0.800000011920929
+ ],
+ "q_max": [
+  1.75,
+  0.11999999731779099,
+  0.30000001192092896,
+  1.649999976158142,
+  1.2999999523162842,
+  0.800000011920929,
+  1.75,
+  0.5,
+  0.6000000238418579,
+  1.649999976158142,
+  1.2999999523162842,
+  0.30000001192092896
+ ],
+ "joint_names": [
+  "r_hip_pitch_joint",
+  "r_hip_roll_joint",
+  "r_thigh_joint",
+  "r_calf_joint",
+  "r_ankle_pitch_joint",
+  "r_ankle_roll_joint",
+  "l_hip_pitch_joint",
+  "l_hip_roll_joint",
+  "l_thigh_joint",
+  "l_calf_joint",
+  "l_ankle_pitch_joint",
+  "l_ankle_roll_joint"
+ ],
+ "limiter": {
+  "rate_rad_per_policy_step": 0.3,
+  "formula": "q*_t = q*_{t-1} + clip(clip(q_default + scale*clip(a,+-50), q_min, q_max) - q*_{t-1}, -L, L)",
+  "init": "q*_{t-1} = clip(q_measured, q_min, q_max) in the passive window and at the first actuated step",
+  "where": "wraps FtsrAction.process_actions in the evaluation process; raw action / observation / network / gains / cap / ranges untouched"
+ },
+ "recovery_criterion": "analyze_recovery.analyze: last 3 s mean h > 0.19 m and mean uprightness > cos 18 deg; strict: h > 0.31 m and upright throughout the last 3 s",
+ "runs": {
+  "runs/it3000_baseline_s2150": {
+   "iteration": 3000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 121.55562353134155
+  },
+  "runs/it3000_baseline_s2151": {
+   "iteration": 3000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.3532567024231
+  },
+  "runs/it3000_baseline_s2152": {
+   "iteration": 3000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.65598011016846
+  },
+  "runs/it3000_limited_s2150": {
+   "iteration": 3000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 121.57898473739624
+  },
+  "runs/it3000_limited_s2151": {
+   "iteration": 3000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.36931681632996
+  },
+  "runs/it3000_limited_s2152": {
+   "iteration": 3000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.67905259132385
+  },
+  "runs/it4000_baseline_s2150": {
+   "iteration": 4000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 126.17138814926147
+  },
+  "runs/it4000_baseline_s2151": {
+   "iteration": 4000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 125.77895522117615
+  },
+  "runs/it4000_baseline_s2152": {
+   "iteration": 4000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 126.24444580078125
+  },
+  "runs/it4000_limited_s2150": {
+   "iteration": 4000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 126.16820335388184
+  },
+  "runs/it4000_limited_s2151": {
+   "iteration": 4000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 125.80247163772583
+  },
+  "runs/it4000_limited_s2152": {
+   "iteration": 4000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 126.26889324188232
+  },
+  "runs/it5000_baseline_s2150": {
+   "iteration": 5000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.10453534126282
+  },
+  "runs/it5000_baseline_s2151": {
+   "iteration": 5000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.08279275894165
+  },
+  "runs/it5000_baseline_s2152": {
+   "iteration": 5000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.45460987091064
+  },
+  "runs/it5000_limited_s2150": {
+   "iteration": 5000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.12654447555542
+  },
+  "runs/it5000_limited_s2151": {
+   "iteration": 5000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.07746458053589
+  },
+  "runs/it5000_limited_s2152": {
+   "iteration": 5000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 122.54214072227478
+  },
+  "runs/it8000_baseline_s2150": {
+   "iteration": 8000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 119.66787242889404
+  },
+  "runs/it8000_baseline_s2151": {
+   "iteration": 8000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 120.01583933830261
+  },
+  "runs/it8000_baseline_s2152": {
+   "iteration": 8000,
+   "config": "baseline",
+   "limit_rad_per_step": 0.0,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 119.60792446136475
+  },
+  "runs/it8000_limited_s2150": {
+   "iteration": 8000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 119.74718523025513
+  },
+  "runs/it8000_limited_s2151": {
+   "iteration": 8000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 120.0085813999176
+  },
+  "runs/it8000_limited_s2152": {
+   "iteration": 8000,
+   "config": "limited",
+   "limit_rad_per_step": 0.3,
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 119.62887525558472
+  },
+  "threshold_scan/0p2/runs/it4000_limited_s2150": {
+   "iteration": 4000,
+   "config": "limited",
+   "limit_rad_per_step": 0.2,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 121.98329305648804
+  },
+  "threshold_scan/0p2/runs/it5000_limited_s2150": {
+   "iteration": 5000,
+   "config": "limited",
+   "limit_rad_per_step": 0.2,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 121.98670792579651
+  },
+  "threshold_scan/0p25/runs/it4000_limited_s2150": {
+   "iteration": 4000,
+   "config": "limited",
+   "limit_rad_per_step": 0.25,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 123.4217381477356
+  },
+  "threshold_scan/0p25/runs/it5000_limited_s2150": {
+   "iteration": 5000,
+   "config": "limited",
+   "limit_rad_per_step": 0.25,
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512,
+   "rollout_seconds": 123.40537405014038
+  }
+ }
+}

@@ -1,0 +1,332 @@
+{
+ "iterations": [
+  3000,
+  4000,
+  5000,
+  8000
+ ],
+ "seeds": [
+  2150,
+  2151,
+  2152
+ ],
+ "init_state_max_abs_diff_per_seed": {
+  "2150": 0.0,
+  "2151": 0.0,
+  "2152": 0.0
+ },
+ "runs": {
+  "it3000_baseline_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it3000_baseline_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it3000_baseline_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 123
+  },
+  "it3000_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 271327,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it3000_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 265776,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000004172325134,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it3000_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 249465,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 123
+  },
+  "it4000_baseline_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 126
+  },
+  "it4000_baseline_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 126
+  },
+  "it4000_baseline_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 126
+  },
+  "it4000_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 306786,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 126
+  },
+  "it4000_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 296914,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 126
+  },
+  "it4000_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 314248,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 126
+  },
+  "it5000_baseline_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it5000_baseline_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it5000_baseline_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it5000_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 226128,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it5000_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 230128,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 122
+  },
+  "it5000_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 224184,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 123
+  },
+  "it8000_baseline_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 120
+  },
+  "it8000_baseline_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 120
+  },
+  "it8000_baseline_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.0,
+    "max_step": 0.0,
+    "clipped": 0,
+    "joint_steps": 0,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.0,
+    "entry_envs": 0,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 120
+  },
+  "it8000_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 733908,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 120
+  },
+  "it8000_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 716617,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 120
+  },
+  "it8000_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "max_step": 0.30000007152557373,
+    "clipped": 712250,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000004172325134,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 120
+  }
+ }
+}

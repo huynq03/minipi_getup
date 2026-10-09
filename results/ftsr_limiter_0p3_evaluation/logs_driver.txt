@@ -1,0 +1,25 @@
+16:50:29 done results/ftsr_limiter_0p3_evaluation/runs/it3000_baseline_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it3000_baseline_s2150: rollout 122s, recovered 99.8%
+16:50:29 done results/ftsr_limiter_0p3_evaluation/runs/it3000_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it3000_limited_s2150: rollout 122s, recovered 93.8%
+16:52:50 done results/ftsr_limiter_0p3_evaluation/runs/it4000_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it4000_limited_s2150: rollout 126s, recovered 98.2%
+16:52:50 done results/ftsr_limiter_0p3_evaluation/runs/it4000_baseline_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it4000_baseline_s2150: rollout 126s, recovered 100.0%
+16:55:07 done results/ftsr_limiter_0p3_evaluation/runs/it5000_baseline_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it5000_baseline_s2150: rollout 122s, recovered 100.0%
+16:55:07 done results/ftsr_limiter_0p3_evaluation/runs/it5000_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it5000_limited_s2150: rollout 122s, recovered 98.2%
+16:57:22 done results/ftsr_limiter_0p3_evaluation/runs/it8000_baseline_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it8000_baseline_s2150: rollout 120s, recovered 99.6%
+16:57:22 done results/ftsr_limiter_0p3_evaluation/runs/it8000_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it8000_limited_s2150: rollout 120s, recovered 48.2%
+16:59:40 done results/ftsr_limiter_0p3_evaluation/runs/it3000_baseline_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it3000_baseline_s2151: rollout 122s, recovered 99.4%
+16:59:40 done results/ftsr_limiter_0p3_evaluation/runs/it3000_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it3000_limited_s2151: rollout 122s, recovered 92.8%
+17:02:00 done results/ftsr_limiter_0p3_evaluation/runs/it4000_baseline_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it4000_baseline_s2151: rollout 126s, recovered 100.0%
+17:02:00 done results/ftsr_limiter_0p3_evaluation/runs/it4000_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it4000_limited_s2151: rollout 126s, recovered 98.2%
+17:04:17 done results/ftsr_limiter_0p3_evaluation/runs/it5000_baseline_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it5000_baseline_s2151: rollout 122s, recovered 100.0%
+17:04:17 done results/ftsr_limiter_0p3_evaluation/runs/it5000_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it5000_limited_s2151: rollout 122s, recovered 98.6%
+17:06:32 done results/ftsr_limiter_0p3_evaluation/runs/it8000_baseline_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it8000_baseline_s2151: rollout 120s, recovered 100.0%
+17:06:33 done results/ftsr_limiter_0p3_evaluation/runs/it8000_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it8000_limited_s2151: rollout 120s, recovered 52.3%
+17:08:50 done results/ftsr_limiter_0p3_evaluation/runs/it3000_baseline_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it3000_baseline_s2152: rollout 123s, recovered 99.6%
+17:08:50 done results/ftsr_limiter_0p3_evaluation/runs/it3000_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it3000_limited_s2152: rollout 123s, recovered 93.8%
+17:11:12 done results/ftsr_limiter_0p3_evaluation/runs/it4000_baseline_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it4000_baseline_s2152: rollout 126s, recovered 100.0%
+17:11:12 done results/ftsr_limiter_0p3_evaluation/runs/it4000_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it4000_limited_s2152: rollout 126s, recovered 98.0%
+17:13:29 done results/ftsr_limiter_0p3_evaluation/runs/it5000_baseline_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it5000_baseline_s2152: rollout 122s, recovered 100.0%
+17:13:29 done results/ftsr_limiter_0p3_evaluation/runs/it5000_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it5000_limited_s2152: rollout 123s, recovered 98.4%
+17:15:44 done results/ftsr_limiter_0p3_evaluation/runs/it8000_baseline_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it8000_baseline_s2152: rollout 120s, recovered 100.0%
+17:15:44 done results/ftsr_limiter_0p3_evaluation/runs/it8000_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_evaluation/runs/it8000_limited_s2152: rollout 120s, recovered 51.6%
+ALL ROLLOUTS DONE

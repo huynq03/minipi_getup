@@ -1,0 +1,38 @@
+{
+ "success_limited": {
+  "env": 0,
+  "pose": "supine",
+  "realtime": "results/ftsr_limiter_0p3_evaluation/videos/it5000_success_limited_env0_realtime.mp4",
+  "slow_0p25x": "results/ftsr_limiter_0p3_evaluation/videos/it5000_success_limited_env0_slow0p25x.mp4"
+ },
+ "failed_limited": {
+  "env": 73,
+  "pose": "prone",
+  "realtime": "results/ftsr_limiter_0p3_evaluation/videos/it5000_failed_limited_env73_realtime.mp4",
+  "slow_0p25x": "results/ftsr_limiter_0p3_evaluation/videos/it5000_failed_limited_env73_slow0p25x.mp4"
+ },
+ "paired": {
+  "env": 2,
+  "pose": "left_side",
+  "realtime": "results/ftsr_limiter_0p3_evaluation/videos/it5000_paired_env2_realtime.mp4",
+  "slow_0p25x": "results/ftsr_limiter_0p3_evaluation/videos/it5000_paired_env2_slow0p25x.mp4"
+ },
+ "paired_trace_plots": {
+  "results/ftsr_limiter_0p3_evaluation/plots/paired_trace_it5000_env0.png": {
+   "env": 0,
+   "joint": "r_hip_pitch"
+  },
+  "results/ftsr_limiter_0p3_evaluation/plots/paired_trace_it5000_env1.png": {
+   "env": 1,
+   "joint": "l_hip_pitch"
+  },
+  "results/ftsr_limiter_0p3_evaluation/plots/paired_trace_it5000_env2.png": {
+   "env": 2,
+   "joint": "l_hip_pitch"
+  },
+  "results/ftsr_limiter_0p3_evaluation/plots/paired_trace_it5000_env3.png": {
+   "env": 3,
+   "joint": "l_hip_pitch"
+  }
+ }
+}
