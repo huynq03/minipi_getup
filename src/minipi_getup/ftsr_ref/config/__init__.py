@@ -47,3 +47,14 @@ register_mjlab_task(
   rl_cfg=recovery_limiter_runner_cfg(LIMIT_TASK),
   runner_cls=FtsrRunner,
 )
+
+# Zero-shot viewing / evaluation of a tighter limiter (0.1 rad / policy step). Same
+# runner cfg as the 0.3 task (periodic evaluation of itself) if it is ever trained.
+LIMIT_TASK_0P1 = "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p1"
+register_mjlab_task(
+  task_id=LIMIT_TASK_0P1,
+  env_cfg=recovery_env_cfg(monotonic=False, target_rate_limit=0.1),
+  play_env_cfg=recovery_env_cfg(play=True, monotonic=False, target_rate_limit=0.1),
+  rl_cfg=recovery_limiter_runner_cfg(LIMIT_TASK_0P1),
+  runner_cls=FtsrRunner,
+)
