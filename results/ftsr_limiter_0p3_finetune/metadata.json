@@ -1,0 +1,256 @@
+{
+ "experiment": "limiter fine-tune: adaptation of the FTSR pd16_noslew recovery policy (model_4000) to a 0.3 rad/policy-step PD-target rate limiter",
+ "fine_tune_run": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000",
+ "fine_tune_log": "logs/ftsr_limit0p3_ft4000.log",
+ "fine_tune_source": {
+  "experiment": "limiter fine-tune 0.3 rad/policy step (adaptation of an FTSR policy)",
+  "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+  "source_run": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700",
+  "source_checkpoint": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4000.pt",
+  "source_sha256": "408df87e06b9fa49659fd98fb971c18fcc27814c53d5d164e97c4b4e43d20ad3",
+  "source_iteration": 4000,
+  "additional_iterations": 1000,
+  "commit": "48b89cca10e174f5bed888ac2e02aac8e355ec01",
+  "changes_vs_source_task": {
+   "env.actions.joint_pos.target_rate_limit": [
+    0.0,
+    0.3
+   ],
+   "agent.eval_every": [
+    500,
+    250
+   ],
+   "agent.eval_at": [
+    "(500, ..., 3500)",
+    "()"
+   ],
+   "agent.eval_task": [
+    "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless",
+    "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3"
+   ]
+  },
+  "unchanged": "rewards, entropy, lr schedule, std, PPO, teacher/student split, force guidance (assist schedule ended at it 3000), observations, commands, reset poses, passive window, PD gains, 16 Nm cap, joint ranges, physics",
+  "best_record": "not inherited: best_recovery.json here ranks limited evaluations only"
+ },
+ "training_commit": "48b89cca10e174f5bed888ac2e02aac8e355ec01",
+ "evaluation_tool": "src/minipi_getup/ftsr_ref/limiter_eval.py (task cfg limiter, applied once), tools/ftsr_limiter_finetune_eval.sh",
+ "checkpoints": {
+  "model_4000": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4000.pt",
+   "sha256": "408df87e06b9fa49659fd98fb971c18fcc27814c53d5d164e97c4b4e43d20ad3"
+  },
+  "model_4250": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000/model_4250.pt",
+   "sha256": "3d700467f8be42fdf50ad2f63e6eb3580954531cdf1a0c423238d7b0a20a98a6"
+  },
+  "model_4500": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000/model_4500.pt",
+   "sha256": "aea114e1e1ce4396624d81bb6bba2e068236c9a815d1f88b96d723e496f7e1ba"
+  },
+  "model_4750": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000/model_4750.pt",
+   "sha256": "5edf3454959c5d1089a91f478e864ee1f440491b1a739332d7964982ad56c760"
+  },
+  "model_5000": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000/model_5000.pt",
+   "sha256": "286e14638b9cd2c91eefc7197371ae771eb552720d63b0d0ece59b205d07b41c"
+  }
+ },
+ "selected_checkpoint": {
+  "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000/model_4500.pt",
+  "sha256": "aea114e1e1ce4396624d81bb6bba2e068236c9a815d1f88b96d723e496f7e1ba"
+ },
+ "baseline": "model_4000 of the source run + the same 0.3 rad/step limiter (zero-shot)",
+ "seeds": [
+  2150,
+  2151,
+  2152
+ ],
+ "episodes_per_pose_per_seed": 128,
+ "poses": [
+  "supine",
+  "prone",
+  "left_side",
+  "right_side"
+ ],
+ "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+ "env_cfg": "play cfg: no observation noise, twist command sampled as in the play cfg (same as all earlier evaluations), reset_pose by_env_index, seed = eval seed",
+ "assist": null,
+ "policy": "student, deterministic (mean action)",
+ "physics_dt": 0.0005,
+ "decimation": 40,
+ "passive_steps": 100,
+ "episode_steps": 999,
+ "kp": [
+  60.0,
+  40.0,
+  20.0,
+  60.0,
+  30.0,
+  10.0,
+  60.0,
+  40.0,
+  20.0,
+  60.0,
+  30.0,
+  10.0
+ ],
+ "kd": [
+  2.4000000953674316,
+  0.800000011920929,
+  0.4000000059604645,
+  2.799999952316284,
+  1.600000023841858,
+  0.30000001192092896,
+  2.4000000953674316,
+  0.800000011920929,
+  0.4000000059604645,
+  2.799999952316284,
+  1.600000023841858,
+  0.30000001192092896
+ ],
+ "tau_cap": 16.0,
+ "limiter": {
+  "rate_rad_per_policy_step": 0.3,
+  "formula": "q_clip = clip(q_default + scale*clip(a,+-50), q_min, q_max); q* = q*_prev + clip(q_clip - q*_prev, -0.3, 0.3)",
+  "init": "q*_prev = clip(q_measured, q_min, q_max) in the passive window and at the first actuated step of each episode (per env)",
+  "note": "limits the PD target, not the joint speed"
+ },
+ "runs": {
+  "runs/it4000_limited_s2150": {
+   "iteration": 4000,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4000_limited_s2151": {
+   "iteration": 4000,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4000_limited_s2152": {
+   "iteration": 4000,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4250_limited_s2150": {
+   "iteration": 4250,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4250_limited_s2151": {
+   "iteration": 4250,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4250_limited_s2152": {
+   "iteration": 4250,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4500_limited_s2150": {
+   "iteration": 4500,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4500_limited_s2151": {
+   "iteration": 4500,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4500_limited_s2152": {
+   "iteration": 4500,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4750_limited_s2150": {
+   "iteration": 4750,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4750_limited_s2151": {
+   "iteration": 4750,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it4750_limited_s2152": {
+   "iteration": 4750,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it5000_limited_s2150": {
+   "iteration": 5000,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2150,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it5000_limited_s2151": {
+   "iteration": 5000,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2151,
+   "per_pose": 128,
+   "num_envs": 512
+  },
+  "runs/it5000_limited_s2152": {
+   "iteration": 5000,
+   "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless-Limit0p3",
+   "limit_rad_per_step": 0.3,
+   "limit_source": "task cfg",
+   "seed": 2152,
+   "per_pose": 128,
+   "num_envs": 512
+  }
+ }
+}

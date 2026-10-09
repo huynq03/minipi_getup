@@ -1,0 +1,246 @@
+{
+ "iterations": [
+  4000,
+  4250,
+  4500,
+  4750,
+  5000
+ ],
+ "seeds": [
+  2150,
+  2151,
+  2152
+ ],
+ "init_state_max_abs_diff_per_seed": {
+  "2150": 0.0,
+  "2151": 0.0,
+  "2152": 0.0
+ },
+ "runs": {
+  "it4000_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 309069,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 181
+  },
+  "it4000_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 295541,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 140
+  },
+  "it4000_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 302269,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 127
+  },
+  "it4250_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 253782,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 181
+  },
+  "it4250_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 256929,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 128
+  },
+  "it4250_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 264748,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000004172325134,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 127
+  },
+  "it4500_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 463627,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000004172325134,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 194
+  },
+  "it4500_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 460572,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000004172325134,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 128
+  },
+  "it4500_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 477314,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000004172325134,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 130
+  },
+  "it4750_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 549214,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 194
+  },
+  "it4750_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 542999,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 132
+  },
+  "it4750_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 555895,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 130
+  },
+  "it5000_limited_s2150": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 735542,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 140
+  },
+  "it5000_limited_s2151": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 746818,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 132
+  },
+  "it5000_limited_s2152": {
+   "limiter_check": {
+    "limit_rad_per_step": 0.3,
+    "limit_source": "task cfg",
+    "entry_base_mismatch_max": 0.0,
+    "max_step": 0.30000007152557373,
+    "clipped": 744028,
+    "joint_steps": 5523456,
+    "outside_range": 0,
+    "entry_max_from_measured": 0.30000007152557373,
+    "entry_envs": 512,
+    "raw_action_mismatch_max": 0.0
+   },
+   "rollout_seconds": 65
+  }
+ }
+}

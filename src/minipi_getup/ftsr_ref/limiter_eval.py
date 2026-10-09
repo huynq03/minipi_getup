@@ -746,6 +746,26 @@ def report(args) -> None:
       row["recovery_time_median_delta_s"] = _fmt(
         row["recovery_time_median_s"] - br["recovery_time_median_s"], 2
       )
+  # Changes vs a reference row (e.g. the source checkpoint with the same limiter).
+  ref = getattr(args, "ref_iteration", 0)
+  rr = pooled.get((ref, "limited"), {}).get("row") if ref else None
+  if rr is not None:
+    for row in comp_rows:
+      for k in (
+        "recovery",
+        "worst_pose",
+        "events_gt20_per_episode",
+        "lifting_qd_p99",
+        "qd_max",
+        "joint_violation_max",
+        "episodes_violation_gt_0p05",
+        "recovery_time_median_s",
+        "recovery_time_p95_s",
+      ):
+        x, y = row[k], rr[k]
+        row[f"{k}_delta_vs_ref"] = (
+          _fmt(x - y, 4) if x is not None and y is not None else None
+        )
   os.makedirs(root, exist_ok=True)
   _csv(os.path.join(root, "checkpoint_comparison.csv"), comp_rows)
   _csv(os.path.join(root, "per_pose_results.csv"), per_pose_rows)
@@ -801,82 +821,45 @@ C_BASE, C_LIM = "#5b6b7a", "#d0731f"
 
 
 def plots(root, runs, pooled, its) -> None:
+  """One compact summary figure (``plots/report.png``)."""
+  del runs
   plt = _style()
   pdir = os.path.join(root, "plots")
   os.makedirs(pdir, exist_ok=True)
-  labels = [f"model_{i}" for i in its]
+  present = [c for c in ("baseline", "limited") if any(k[1] == c for k in pooled)]
+  col = {"baseline": C_BASE, "limited": C_LIM}
+  lab = {"baseline": "no limiter", "limited": "limiter 0.3 rad/step"}
   x = np.arange(len(its))
-  w = 0.38
-
-  def bars(key, title, fname, fmt="{:.1f}", scale=1.0, ylabel=""):
-    fig, ax = plt.subplots(figsize=(6.4, 3.4))
-    for off, c, col, lab in (
-      (-w / 2, "baseline", C_BASE, "no limiter"),
-      (w / 2, "limited", C_LIM, "limiter 0.3 rad/step"),
-    ):
+  w = 0.8 / len(present)
+  panels = (
+    ("recovery", "Recovery, pooled (%)", 100.0, "{:.1f}"),
+    ("worst_pose_min_seed", "Worst pose, min over seeds (%)", 100.0, "{:.1f}"),
+    ("events_gt20_per_episode", "|qdot| > 20 rad/s events / episode", 1.0, "{:.2f}"),
+    ("qd_max", "Max |qdot| (rad/s)", 1.0, "{:.1f}"),
+    ("joint_violation_max", "Max joint-limit penetration (rad)", 1.0, "{:.2f}"),
+    ("recovery_time_median_s", "Median recovery time (s)", 1.0, "{:.2f}"),
+  )
+  fig, axs = plt.subplots(2, 3, figsize=(13, 6.2))
+  for ax, (key, title, sc, fmt) in zip(axs.flat, panels, strict=True):
+    for k, c in enumerate(present):
       v = [
-        (pooled[(i, c)]["row"][key] or 0) * scale if (i, c) in pooled else 0
+        (pooled[(i, c)]["row"][key] or 0) * sc if (i, c) in pooled else np.nan
         for i in its
       ]
-      b = ax.bar(x + off, v, w - 0.03, color=col, label=lab)
-      ax.bar_label(b, [fmt.format(y) for y in v], fontsize=8, padding=2)
-    ax.set_xticks(x, labels)
-    ax.set_title(title)
-    ax.set_ylabel(ylabel)
-    ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1, 1))
-    fig.tight_layout()
-    fig.savefig(os.path.join(pdir, fname))
-    plt.close(fig)
-
-  bars("recovery", "Recovery (all seeds pooled)", "recovery.png", scale=100, ylabel="%")
-  bars("worst_pose", "Worst-pose recovery", "worst_pose.png", scale=100, ylabel="%")
-  bars(
-    "events_gt20_per_episode",
-    "|qdot| > 20 rad/s events per episode",
-    "events_gt20.png",
-    fmt="{:.2f}",
+      off = (k - (len(present) - 1) / 2) * w
+      b = ax.bar(x + off, v, w * 0.92, color=col[c], label=lab[c])
+      ax.bar_label(b, [fmt.format(y) for y in v], fontsize=7, padding=1)
+    ax.set_xticks(x, [f"{i}" for i in its], fontsize=8)
+    ax.set_title(title, fontsize=9)
+    ax.margins(y=0.15)
+  axs[0, 0].legend(frameon=False, fontsize=7, loc="lower left")
+  fig.suptitle(
+    f"{os.path.basename(os.path.normpath(root))}: deterministic student, zero assist, "
+    "seeds pooled (x-axis: checkpoint iteration)",
+    fontsize=10,
   )
-  bars(
-    "lifting_qd_p99", "Lifting-phase (A) |qdot| p99", "lifting_p99.png", ylabel="rad/s"
-  )
-  bars("qd_max", "Maximum |qdot|", "qd_max.png", ylabel="rad/s")
-  bars(
-    "recovery_time_median_s",
-    "Median recovery time",
-    "recovery_time.png",
-    fmt="{:.2f}",
-    ylabel="s",
-  )
-  bars(
-    "joint_violation_max",
-    "Maximum joint-limit penetration",
-    "joint_violation.png",
-    fmt="{:.3f}",
-    ylabel="rad",
-  )
-
-  # Lifting-phase |qdot| distributions (CCDF), per checkpoint.
-  fig, axs = plt.subplots(1, len(its), figsize=(3.0 * len(its), 3.0), sharey=True)
-  axs = np.atleast_1d(axs)
-  for ax, i in zip(axs, its, strict=True):
-    for c, col, lab in (
-      ("baseline", C_BASE, "no limiter"),
-      ("limited", C_LIM, "0.3 rad/step"),
-    ):
-      if (i, c) not in pooled:
-        continue
-      h = pooled[(i, c)]["hist"][0].sum(0).astype(float)
-      ccdf = 1.0 - np.cumsum(h) / h.sum()
-      xs = np.arange(NB) / Q
-      ax.semilogy(xs, np.maximum(ccdf, 1e-9), color=col, lw=1.6, label=lab)
-    ax.set_xlim(0, 50)
-    ax.set_ylim(1e-7, 1)
-    ax.set_title(f"model_{i}, phase A")
-    ax.set_xlabel("|qdot| (rad/s)")
-  axs[0].set_ylabel("fraction of samples above")
-  axs[-1].legend(frameon=False)
   fig.tight_layout()
-  fig.savefig(os.path.join(pdir, "lifting_qd_ccdf.png"))
+  fig.savefig(os.path.join(pdir, "report.png"))
   plt.close(fig)
 
 
@@ -1026,6 +1009,90 @@ def videos(args) -> None:
   print("[videos] done", flush=True)
 
 
+def videos_selected(args) -> None:
+  """ONE real-time video of one run: a 2 x 2 grid of the four poses, each the lowest
+  env index of that pose that recovered (fixed rule, not chosen by appearance), from
+  the passive window to the end of the episode. If the run has failures, the
+  lowest-index failure replaces nothing and is written as a second video."""
+  import imageio.v2 as imageio
+
+  from minipi_getup.ftsr_ref.analyze_recovery import _scene_model
+  from minipi_getup.ftsr_ref.visual_demo import Renderer
+
+  meta = json.load(open(os.path.join(args.run, "meta.json")))
+  st = json.load(open(os.path.join(args.run, "stats.json")))
+  z = np.load(os.path.join(args.run, "run.npz"))
+  rec = np.array(st["per_env"]["recovered"], bool)
+  cat = st["per_env"]["cat"]
+  pose = z["pose"]
+  grid = []
+  for g in range(len(FALLEN_POSE_NAMES)):
+    ok = np.nonzero((pose == g) & rec)[0]
+    if ok.size:
+      grid.append(int(ok[0]))
+  bad = np.nonzero(~rec)[0]
+  rends = [Renderer(_scene_model()) for _ in grid]
+  os.makedirs(args.out, exist_ok=True)
+  dt, P = meta["policy_dt"], meta["passive_steps"]
+  origins = np.array(meta["origins"])
+  T = z["qpos"].shape[0]
+  tag0 = f"{args.label or 'it' + str(meta['iteration'])}_s{meta['seed']}"
+
+  def tile(rend, e, k):
+    img = rend.frame(z["qpos"][k, e], origins[e])
+    qm = float(z["qd_step_max"][k, e].astype(np.float32).max())
+    lines = [
+      f"{FALLEN_POSE_NAMES[int(pose[e])]} env {e} "
+      f"[{'recovered' if rec[e] else 'NOT recovered: ' + cat[e]}]",
+      f"t {(k + 1) * dt:5.2f} s{' passive' if k < P else ''}  h {z['h'][k, e]:.3f} m",
+      f"max |qdot| {qm:4.1f} rad/s",
+    ]
+    return rend.overlay(img, lines)
+
+  head = (
+    f"{tag0}  limiter {meta['limit_rad_per_step']} rad/step on the PD target "
+    "(joint speed not hard-limited), zero assist, deterministic, simulation"
+  )
+  frames = []
+  for k in range(T):
+    t_ = [tile(r, e, k) for r, e in zip(rends, grid, strict=True)]
+    while len(t_) < 4:
+      t_.append(np.zeros_like(t_[0]))
+    img = np.concatenate(
+      [np.concatenate(t_[:2], axis=1), np.concatenate(t_[2:], axis=1)], axis=0
+    )
+    if k == 0:
+      strip = rends[0].overlay(np.zeros((38,) + img.shape[1:], np.uint8), [head])
+    frames.append(np.concatenate([strip, img], axis=0))
+  out = {"grid": os.path.join(args.out, f"{tag0}_4poses_realtime.mp4")}
+  imageio.mimwrite(out["grid"], frames, fps=int(round(1.0 / dt)), quality=7)
+  if bad.size:
+    e = int(bad[0])
+    rend = Renderer(_scene_model())
+    out["failure"] = os.path.join(args.out, f"{tag0}_failure_env{e}_realtime.mp4")
+    imageio.mimwrite(
+      out["failure"],
+      [tile(rend, e, k) for k in range(T)],
+      fps=int(round(1.0 / dt)),
+      quality=7,
+    )
+  info = {
+    "selection_rule": "per pose: lowest env index that recovered; failure: lowest "
+    "env index that did not recover",
+    "grid_envs": dict(zip(FALLEN_POSE_NAMES, grid, strict=False)),
+    "failure_env": int(bad[0]) if bad.size else None,
+    "checkpoint": meta["checkpoint"],
+    "checkpoint_sha256": meta["checkpoint_sha256"],
+    "seed": meta["seed"],
+    "limiter": f"{meta['limit_rad_per_step']} rad/policy step ({meta['limit_source']})",
+    "pose_recovery": {k: v["recovered"] for k, v in st["per_pose"].items()},
+    "videos": out,
+  }
+  with open(os.path.join(args.out, f"{tag0}_videos.json"), "w") as f:
+    json.dump(info, f, indent=1)
+  print("[videos_selected] done", flush=True)
+
+
 def main() -> None:
   ap = argparse.ArgumentParser()
   sp = ap.add_subparsers(dest="cmd", required=True)
@@ -1042,12 +1109,22 @@ def main() -> None:
   r.add_argument("--steps", type=int, default=0, help="debug: policy steps (0 = all)")
   a = sp.add_parser("report")
   a.add_argument("--root", required=True)
+  a.add_argument("--ref-iteration", type=int, default=0)
   v = sp.add_parser("videos")
   v.add_argument("--root", required=True)
   v.add_argument("--iteration", type=int, required=True)
   v.add_argument("--seed", type=int, default=2150)
+  vs = sp.add_parser("videos_selected")
+  vs.add_argument("--run", required=True)
+  vs.add_argument("--out", required=True)
+  vs.add_argument("--label", default="")
   args = ap.parse_args()
-  {"rollout": rollout, "report": report, "videos": videos}[args.cmd](args)
+  {
+    "rollout": rollout,
+    "report": report,
+    "videos": videos,
+    "videos_selected": videos_selected,
+  }[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+19:10:58 done results/ftsr_limiter_0p3_finetune/runs/it4250_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4250_limited_s2150: rollout 181s, recovered 99.6%
+19:10:58 done results/ftsr_limiter_0p3_finetune/runs/it4000_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4000_limited_s2150: rollout 181s, recovered 98.2%
+19:14:28 done results/ftsr_limiter_0p3_finetune/runs/it4750_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4750_limited_s2150: rollout 194s, recovered 99.8%
+19:14:28 done results/ftsr_limiter_0p3_finetune/runs/it4500_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4500_limited_s2150: rollout 194s, recovered 100.0%
+19:17:02 done results/ftsr_limiter_0p3_finetune/runs/it4000_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4000_limited_s2151: rollout 140s, recovered 98.6%
+19:17:03 done results/ftsr_limiter_0p3_finetune/runs/it5000_limited_s2150 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it5000_limited_s2150: rollout 140s, recovered 100.0%
+19:19:25 done results/ftsr_limiter_0p3_finetune/runs/it4250_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4250_limited_s2151: rollout 128s, recovered 100.0%
+19:19:25 done results/ftsr_limiter_0p3_finetune/runs/it4500_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4500_limited_s2151: rollout 128s, recovered 100.0%
+19:21:53 done results/ftsr_limiter_0p3_finetune/runs/it4750_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4750_limited_s2151: rollout 132s, recovered 100.0%
+19:21:53 done results/ftsr_limiter_0p3_finetune/runs/it5000_limited_s2151 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it5000_limited_s2151: rollout 132s, recovered 100.0%
+19:24:14 done results/ftsr_limiter_0p3_finetune/runs/it4250_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4250_limited_s2152: rollout 127s, recovered 100.0%
+19:24:15 done results/ftsr_limiter_0p3_finetune/runs/it4000_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4000_limited_s2152: rollout 127s, recovered 98.0%
+19:26:39 done results/ftsr_limiter_0p3_finetune/runs/it4750_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4750_limited_s2152: rollout 130s, recovered 100.0%
+19:26:39 done results/ftsr_limiter_0p3_finetune/runs/it4500_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it4500_limited_s2152: rollout 130s, recovered 100.0%
+19:27:58 done results/ftsr_limiter_0p3_finetune/runs/it5000_limited_s2152 rc=0 [limiter_eval] results/ftsr_limiter_0p3_finetune/runs/it5000_limited_s2152: rollout 65s, recovered 100.0%
+ALL ROLLOUTS DONE
