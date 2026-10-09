@@ -1,0 +1,1030 @@
+{
+ "runs": [
+  {
+   "run": "it_2500",
+   "iteration": 2500,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-08_23-51-06_ftsr_recovery_pd16_noslew/model_2500.pt",
+   "episodes": 128,
+   "success": 38,
+   "failed": 90,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 0.28125,
+    "prone": 0.21875,
+    "left_side": 0.4375,
+    "right_side": 0.25
+   },
+   "strict_by_pose": {
+    "supine": 0.28125,
+    "prone": 0.21875,
+    "left_side": 0.4375,
+    "right_side": 0.25
+   },
+   "t_h1_median_s": 1.6400000000000001,
+   "t_h2_median_s": 5.46,
+   "t_stable_median_s": 5.18,
+   "regressions_below_h1_mean": 0.953125,
+   "fell_after_stable": 1,
+   "qd_max_valid": 41.788455963134766,
+   "spike_events_above_20": 4768,
+   "spike_causes": {
+    "1 large policy target jump (>= 0.25 rad / 20 ms, toward the motion)": 4729,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 30,
+    "6 other (inertial / gravity coupling) or unresolved": 7,
+    "4 joint-limit interaction": 2
+   },
+   "counterfactual_target_rate_limit": null
+  },
+  {
+   "run": "it_3000",
+   "iteration": 3000,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3000.pt",
+   "episodes": 128,
+   "success": 128,
+   "failed": 0,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 1.0,
+    "prone": 1.0,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "strict_by_pose": {
+    "supine": 1.0,
+    "prone": 1.0,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "t_h1_median_s": 0.22,
+   "t_h2_median_s": 0.4,
+   "t_stable_median_s": 0.58,
+   "regressions_below_h1_mean": 0.203125,
+   "fell_after_stable": 1,
+   "qd_max_valid": 46.93053436279297,
+   "spike_events_above_20": 2185,
+   "spike_causes": {
+    "1 large policy target jump (>= 0.25 rad / 20 ms, toward the motion)": 2170,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 10,
+    "4 joint-limit interaction": 5
+   },
+   "counterfactual_target_rate_limit": null
+  },
+  {
+   "run": "it_3500",
+   "iteration": 3500,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3500.pt",
+   "episodes": 128,
+   "success": 125,
+   "failed": 3,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 0.9375,
+    "prone": 0.96875,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "strict_by_pose": {
+    "supine": 0.9375,
+    "prone": 0.96875,
+    "left_side": 0.9375,
+    "right_side": 1.0
+   },
+   "t_h1_median_s": 0.28,
+   "t_h2_median_s": 0.4,
+   "t_stable_median_s": 0.44,
+   "regressions_below_h1_mean": 0.1484375,
+   "fell_after_stable": 3,
+   "qd_max_valid": 45.34412384033203,
+   "spike_events_above_20": 2165,
+   "spike_causes": {
+    "1 large policy target jump (>= 0.25 rad / 20 ms, toward the motion)": 2159,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 4,
+    "4 joint-limit interaction": 1,
+    "6 other (inertial / gravity coupling) or unresolved": 1
+   },
+   "counterfactual_target_rate_limit": null
+  },
+  {
+   "run": "it_4000",
+   "iteration": 4000,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4000.pt",
+   "episodes": 128,
+   "success": 128,
+   "failed": 0,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 1.0,
+    "prone": 1.0,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "strict_by_pose": {
+    "supine": 1.0,
+    "prone": 1.0,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "t_h1_median_s": 0.21000000000000002,
+   "t_h2_median_s": 0.3,
+   "t_stable_median_s": 0.37,
+   "regressions_below_h1_mean": 0.171875,
+   "fell_after_stable": 2,
+   "qd_max_valid": 46.056114196777344,
+   "spike_events_above_20": 2050,
+   "spike_causes": {
+    "1 large policy target jump (>= 0.25 rad / 20 ms, toward the motion)": 2045,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 3,
+    "6 other (inertial / gravity coupling) or unresolved": 2
+   },
+   "counterfactual_target_rate_limit": null
+  },
+  {
+   "run": "it_4500",
+   "iteration": 4500,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4500.pt",
+   "episodes": 128,
+   "success": 128,
+   "failed": 0,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 1.0,
+    "prone": 1.0,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "strict_by_pose": {
+    "supine": 1.0,
+    "prone": 1.0,
+    "left_side": 1.0,
+    "right_side": 1.0
+   },
+   "t_h1_median_s": 0.22,
+   "t_h2_median_s": 0.3,
+   "t_stable_median_s": 0.34,
+   "regressions_below_h1_mean": 0.0703125,
+   "fell_after_stable": 0,
+   "qd_max_valid": 47.24063491821289,
+   "spike_events_above_20": 1845,
+   "spike_causes": {
+    "1 large policy target jump (>= 0.25 rad / 20 ms, toward the motion)": 1841,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 3,
+    "6 other (inertial / gravity coupling) or unresolved": 1
+   },
+   "counterfactual_target_rate_limit": null
+  },
+  {
+   "run": "counterfactual_it3000_rate0p3",
+   "iteration": 3000,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3000.pt",
+   "episodes": 128,
+   "success": 120,
+   "failed": 8,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 1.0,
+    "prone": 0.875,
+    "left_side": 0.90625,
+    "right_side": 0.96875
+   },
+   "strict_by_pose": {
+    "supine": 1.0,
+    "prone": 0.875,
+    "left_side": 0.90625,
+    "right_side": 0.96875
+   },
+   "t_h1_median_s": 1.04,
+   "t_h2_median_s": 1.9,
+   "t_stable_median_s": 2.8200000000000003,
+   "regressions_below_h1_mean": 0.9453125,
+   "fell_after_stable": 2,
+   "qd_max_valid": 35.338985443115234,
+   "spike_events_above_20": 97,
+   "spike_causes": {
+    "1 large policy target jump (>= 0.25 rad / 20 ms, toward the motion)": 88,
+    "3 ground impact / contact impulse": 1,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 8
+   },
+   "counterfactual_target_rate_limit": 0.3
+  },
+  {
+   "run": "counterfactual_it3000_rate0p2",
+   "iteration": 3000,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3000.pt",
+   "episodes": 128,
+   "success": 10,
+   "failed": 118,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 0.09375,
+    "prone": 0.0625,
+    "left_side": 0.03125,
+    "right_side": 0.125
+   },
+   "strict_by_pose": {
+    "supine": 0.09375,
+    "prone": 0.0625,
+    "left_side": 0.03125,
+    "right_side": 0.125
+   },
+   "t_h1_median_s": 3.2,
+   "t_h2_median_s": 9.9,
+   "t_stable_median_s": 6.77,
+   "regressions_below_h1_mean": 1.8515625,
+   "fell_after_stable": 1,
+   "qd_max_valid": 20.831457138061523,
+   "spike_events_above_20": 5,
+   "spike_causes": {
+    "4 joint-limit interaction": 1,
+    "2 actuator-driven without a target jump (sustained error / saturation)": 2,
+    "3 ground impact / contact impulse": 2
+   },
+   "counterfactual_target_rate_limit": 0.2
+  },
+  {
+   "run": "counterfactual_it3000_rate0p1",
+   "iteration": 3000,
+   "checkpoint": "/home/huy/minipi_getup_ftsr/logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3000.pt",
+   "episodes": 128,
+   "success": 0,
+   "failed": 128,
+   "invalid": 0,
+   "recovered_by_pose": {
+    "supine": 0.0,
+    "prone": 0.0,
+    "left_side": 0.0,
+    "right_side": 0.0
+   },
+   "strict_by_pose": {
+    "supine": 0.0,
+    "prone": 0.0,
+    "left_side": 0.0,
+    "right_side": 0.0
+   },
+   "t_h1_median_s": NaN,
+   "t_h2_median_s": NaN,
+   "t_stable_median_s": NaN,
+   "regressions_below_h1_mean": 0.0,
+   "fell_after_stable": 0,
+   "qd_max_valid": 19.409584045410156,
+   "spike_events_above_20": 0,
+   "spike_causes": {},
+   "counterfactual_target_rate_limit": 0.1
+  }
+ ],
+ "reward_check": [
+  {
+   "run": "it_2500",
+   "iteration": 2500,
+   "max_abs_diff_logged_vs_last_substep": 3.814697265625e-06,
+   "mean_logged_per_s": -0.19621238112449646,
+   "mean_if_every_physics_step_per_s": -0.2572380006313324,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.23627772357092358
+  },
+  {
+   "run": "it_3000",
+   "iteration": 3000,
+   "max_abs_diff_logged_vs_last_substep": 2.86102294921875e-06,
+   "mean_logged_per_s": -0.08030036091804504,
+   "mean_if_every_physics_step_per_s": -0.10572585463523865,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.25776811419688894
+  },
+  {
+   "run": "it_3500",
+   "iteration": 3500,
+   "max_abs_diff_logged_vs_last_substep": 3.814697265625e-06,
+   "mean_logged_per_s": -0.07465123385190964,
+   "mean_if_every_physics_step_per_s": -0.10909998416900635,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.41460549790642637
+  },
+  {
+   "run": "it_4000",
+   "iteration": 4000,
+   "max_abs_diff_logged_vs_last_substep": 5.7220458984375e-06,
+   "mean_logged_per_s": -0.06897270679473877,
+   "mean_if_every_physics_step_per_s": -0.09997646510601044,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.42925597057535825
+  },
+  {
+   "run": "it_4500",
+   "iteration": 4500,
+   "max_abs_diff_logged_vs_last_substep": 3.814697265625e-06,
+   "mean_logged_per_s": -0.06346779316663742,
+   "mean_if_every_physics_step_per_s": -0.0933610051870346,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.43324517545196795
+  },
+  {
+   "run": "counterfactual_it3000_rate0p3",
+   "iteration": 3000,
+   "max_abs_diff_logged_vs_last_substep": 4.76837158203125e-07,
+   "mean_logged_per_s": -0.04343971610069275,
+   "mean_if_every_physics_step_per_s": -0.07613832503557205,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.23039075212426502
+  },
+  {
+   "run": "counterfactual_it3000_rate0p2",
+   "iteration": 3000,
+   "max_abs_diff_logged_vs_last_substep": 2.384185791015625e-07,
+   "mean_logged_per_s": -0.026026301085948944,
+   "mean_if_every_physics_step_per_s": -0.06109582632780075,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.28451903944015083
+  },
+  {
+   "run": "counterfactual_it3000_rate0p1",
+   "iteration": 3000,
+   "max_abs_diff_logged_vs_last_substep": 2.9802322387695312e-08,
+   "mean_logged_per_s": -0.00012299865193199366,
+   "mean_if_every_physics_step_per_s": -0.00019917981990147382,
+   "frac_of_over_6p28_physics_samples_missed_by_50Hz_sample": 0.6991773198370771
+  }
+ ],
+ "effective_inertia": {
+  "it_2500": {
+   "r_hip_pitch": {
+    "samples": 6384,
+    "inertia_median_kgm2": 0.017070284113287926,
+    "inertia_p25_kgm2": 0.008877838030457497,
+    "inertia_p75_kgm2": 0.03607972711324692,
+    "time_to_20rad_s_at_16Nm_ms": 21.337855141609907
+   },
+   "r_hip_roll": {
+    "samples": 430,
+    "inertia_median_kgm2": 0.044831760227680206,
+    "inertia_p25_kgm2": 0.02534276247024536,
+    "inertia_p75_kgm2": 0.08024519681930542,
+    "time_to_20rad_s_at_16Nm_ms": 56.03970028460026
+   },
+   "r_thigh": {
+    "samples": 15,
+    "inertia_median_kgm2": 0.004814665764570236,
+    "inertia_p25_kgm2": 0.004138160962611437,
+    "inertia_p75_kgm2": 0.005337103269994259,
+    "time_to_20rad_s_at_16Nm_ms": 6.018332205712795
+   },
+   "r_calf": {
+    "samples": 27838,
+    "inertia_median_kgm2": 0.05415833741426468,
+    "inertia_p25_kgm2": 0.03029024973511696,
+    "inertia_p75_kgm2": 0.10521676391363144,
+    "time_to_20rad_s_at_16Nm_ms": 67.69792176783085
+   },
+   "r_ankle_pitch": {
+    "samples": 2902,
+    "inertia_median_kgm2": 0.02262706123292446,
+    "inertia_p25_kgm2": 0.013557594269514084,
+    "inertia_p75_kgm2": 0.04592854157090187,
+    "time_to_20rad_s_at_16Nm_ms": 28.283826541155577
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 7758,
+    "inertia_median_kgm2": 0.21664704382419586,
+    "inertia_p25_kgm2": 0.024381639435887337,
+    "inertia_p75_kgm2": 0.6940065026283264,
+    "time_to_20rad_s_at_16Nm_ms": 270.8088047802448
+   },
+   "l_hip_roll": {
+    "samples": 1002,
+    "inertia_median_kgm2": 0.06153258681297302,
+    "inertia_p25_kgm2": 0.03159632533788681,
+    "inertia_p75_kgm2": 0.09627284854650497,
+    "time_to_20rad_s_at_16Nm_ms": 76.91573351621628
+   },
+   "l_thigh": {
+    "samples": 94,
+    "inertia_median_kgm2": 0.011288447305560112,
+    "inertia_p25_kgm2": 0.009342730045318604,
+    "inertia_p75_kgm2": 0.11348915100097656,
+    "time_to_20rad_s_at_16Nm_ms": 14.11055913195014
+   },
+   "l_calf": {
+    "samples": 56176,
+    "inertia_median_kgm2": 0.01924283429980278,
+    "inertia_p25_kgm2": 0.012681319378316402,
+    "inertia_p75_kgm2": 1.0685282945632935,
+    "time_to_20rad_s_at_16Nm_ms": 24.053542874753475
+   },
+   "l_ankle_pitch": {
+    "samples": 2733,
+    "inertia_median_kgm2": 0.04175115376710892,
+    "inertia_p25_kgm2": 0.002205498982220888,
+    "inertia_p75_kgm2": 0.09967193752527237,
+    "time_to_20rad_s_at_16Nm_ms": 52.18894220888615
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "it_3000": {
+   "r_hip_pitch": {
+    "samples": 9874,
+    "inertia_median_kgm2": 0.06609988957643509,
+    "inertia_p25_kgm2": 0.020803257822990417,
+    "inertia_p75_kgm2": 0.13075751066207886,
+    "time_to_20rad_s_at_16Nm_ms": 82.62486197054386
+   },
+   "r_hip_roll": {
+    "samples": 600,
+    "inertia_median_kgm2": 0.05989735201001167,
+    "inertia_p25_kgm2": 0.03673043102025986,
+    "inertia_p75_kgm2": 0.09107430279254913,
+    "time_to_20rad_s_at_16Nm_ms": 74.87169001251459
+   },
+   "r_thigh": {
+    "samples": 30,
+    "inertia_median_kgm2": 0.0065405359491705894,
+    "inertia_p25_kgm2": 0.004367329180240631,
+    "inertia_p75_kgm2": 0.011267174035310745,
+    "time_to_20rad_s_at_16Nm_ms": 8.175669936463237
+   },
+   "r_calf": {
+    "samples": 6757,
+    "inertia_median_kgm2": 0.05523131415247917,
+    "inertia_p25_kgm2": 0.010743600316345692,
+    "inertia_p75_kgm2": 0.09221569448709488,
+    "time_to_20rad_s_at_16Nm_ms": 69.03914269059896
+   },
+   "r_ankle_pitch": {
+    "samples": 1477,
+    "inertia_median_kgm2": 0.12216627597808838,
+    "inertia_p25_kgm2": 0.013850239105522633,
+    "inertia_p75_kgm2": 0.18752722442150116,
+    "time_to_20rad_s_at_16Nm_ms": 152.70784497261047
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 4684,
+    "inertia_median_kgm2": 0.04556597024202347,
+    "inertia_p25_kgm2": 0.019990677013993263,
+    "inertia_p75_kgm2": 0.06996750086545944,
+    "time_to_20rad_s_at_16Nm_ms": 56.957462802529335
+   },
+   "l_hip_roll": {
+    "samples": 1754,
+    "inertia_median_kgm2": 0.03146472945809364,
+    "inertia_p25_kgm2": 0.01633298024535179,
+    "inertia_p75_kgm2": 0.07093898206949234,
+    "time_to_20rad_s_at_16Nm_ms": 39.330911822617054
+   },
+   "l_thigh": {
+    "samples": 69,
+    "inertia_median_kgm2": 0.009912014938890934,
+    "inertia_p25_kgm2": 0.008160796016454697,
+    "inertia_p75_kgm2": 0.011607132852077484,
+    "time_to_20rad_s_at_16Nm_ms": 12.390018673613667
+   },
+   "l_calf": {
+    "samples": 5772,
+    "inertia_median_kgm2": 0.01147577166557312,
+    "inertia_p25_kgm2": 0.005312667228281498,
+    "inertia_p75_kgm2": 0.022902661934494972,
+    "time_to_20rad_s_at_16Nm_ms": 14.3447145819664
+   },
+   "l_ankle_pitch": {
+    "samples": 612,
+    "inertia_median_kgm2": 0.015920184552669525,
+    "inertia_p25_kgm2": 0.0021865656599402428,
+    "inertia_p75_kgm2": 0.06052719056606293,
+    "time_to_20rad_s_at_16Nm_ms": 19.900230690836906
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "it_3500": {
+   "r_hip_pitch": {
+    "samples": 11017,
+    "inertia_median_kgm2": 0.06461597979068756,
+    "inertia_p25_kgm2": 0.03047950752079487,
+    "inertia_p75_kgm2": 0.1096523255109787,
+    "time_to_20rad_s_at_16Nm_ms": 80.76997473835945
+   },
+   "r_hip_roll": {
+    "samples": 964,
+    "inertia_median_kgm2": 0.04525891691446304,
+    "inertia_p25_kgm2": 0.03053591586649418,
+    "inertia_p75_kgm2": 0.06730950623750687,
+    "time_to_20rad_s_at_16Nm_ms": 56.573646143078804
+   },
+   "r_thigh": {
+    "samples": 9,
+    "inertia_median_kgm2": 0.003958722576498985,
+    "inertia_p25_kgm2": 0.0034190542064607143,
+    "inertia_p75_kgm2": 0.004272606689482927,
+    "time_to_20rad_s_at_16Nm_ms": 4.948403220623732
+   },
+   "r_calf": {
+    "samples": 4063,
+    "inertia_median_kgm2": 0.052392832934856415,
+    "inertia_p25_kgm2": 0.009768374264240265,
+    "inertia_p75_kgm2": 0.09341881424188614,
+    "time_to_20rad_s_at_16Nm_ms": 65.49104116857052
+   },
+   "r_ankle_pitch": {
+    "samples": 5412,
+    "inertia_median_kgm2": 0.16428142786026,
+    "inertia_p25_kgm2": 0.08691665530204773,
+    "inertia_p75_kgm2": 0.3194751441478729,
+    "time_to_20rad_s_at_16Nm_ms": 205.351784825325
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 25268,
+    "inertia_median_kgm2": 0.040297456085681915,
+    "inertia_p25_kgm2": 0.02890957146883011,
+    "inertia_p75_kgm2": 0.061489421874284744,
+    "time_to_20rad_s_at_16Nm_ms": 50.371820107102394
+   },
+   "l_hip_roll": {
+    "samples": 1116,
+    "inertia_median_kgm2": 0.02297668531537056,
+    "inertia_p25_kgm2": 0.012839430011808872,
+    "inertia_p75_kgm2": 0.051341816782951355,
+    "time_to_20rad_s_at_16Nm_ms": 28.7208566442132
+   },
+   "l_thigh": {
+    "samples": 36,
+    "inertia_median_kgm2": 0.011848438531160355,
+    "inertia_p25_kgm2": 0.010101660154759884,
+    "inertia_p75_kgm2": 0.016270115971565247,
+    "time_to_20rad_s_at_16Nm_ms": 14.810548163950443
+   },
+   "l_calf": {
+    "samples": 24142,
+    "inertia_median_kgm2": 0.02455046959221363,
+    "inertia_p25_kgm2": 0.011276624165475368,
+    "inertia_p75_kgm2": 0.04200465977191925,
+    "time_to_20rad_s_at_16Nm_ms": 30.68808699026704
+   },
+   "l_ankle_pitch": {
+    "samples": 18971,
+    "inertia_median_kgm2": 0.17314261198043823,
+    "inertia_p25_kgm2": 0.09241501986980438,
+    "inertia_p75_kgm2": 0.36371350288391113,
+    "time_to_20rad_s_at_16Nm_ms": 216.4282649755478
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "it_4000": {
+   "r_hip_pitch": {
+    "samples": 4512,
+    "inertia_median_kgm2": 0.04117583483457565,
+    "inertia_p25_kgm2": 0.01384627353399992,
+    "inertia_p75_kgm2": 0.08390706032514572,
+    "time_to_20rad_s_at_16Nm_ms": 51.469793543219566
+   },
+   "r_hip_roll": {
+    "samples": 1400,
+    "inertia_median_kgm2": 0.05083644390106201,
+    "inertia_p25_kgm2": 0.03388917073607445,
+    "inertia_p75_kgm2": 0.06624720990657806,
+    "time_to_20rad_s_at_16Nm_ms": 63.545554876327515
+   },
+   "r_thigh": {
+    "samples": 6,
+    "inertia_median_kgm2": 0.031251680105924606,
+    "inertia_p25_kgm2": 0.01932203397154808,
+    "inertia_p75_kgm2": 0.03317496180534363,
+    "time_to_20rad_s_at_16Nm_ms": 39.06460013240576
+   },
+   "r_calf": {
+    "samples": 1545,
+    "inertia_median_kgm2": 0.01080840453505516,
+    "inertia_p25_kgm2": 0.006111753638833761,
+    "inertia_p75_kgm2": 0.05302877351641655,
+    "time_to_20rad_s_at_16Nm_ms": 13.51050566881895
+   },
+   "r_ankle_pitch": {
+    "samples": 3021,
+    "inertia_median_kgm2": 0.18582352995872498,
+    "inertia_p25_kgm2": 0.1255260556936264,
+    "inertia_p75_kgm2": 0.3486374616622925,
+    "time_to_20rad_s_at_16Nm_ms": 232.27941244840622
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 6533,
+    "inertia_median_kgm2": 0.04060424491763115,
+    "inertia_p25_kgm2": 0.026546569541096687,
+    "inertia_p75_kgm2": 0.06209223344922066,
+    "time_to_20rad_s_at_16Nm_ms": 50.75530614703894
+   },
+   "l_hip_roll": {
+    "samples": 1082,
+    "inertia_median_kgm2": 0.04138307273387909,
+    "inertia_p25_kgm2": 0.013179080560803413,
+    "inertia_p75_kgm2": 0.06982438266277313,
+    "time_to_20rad_s_at_16Nm_ms": 51.72884091734886
+   },
+   "l_thigh": {
+    "samples": 62,
+    "inertia_median_kgm2": 0.013562164269387722,
+    "inertia_p25_kgm2": 0.011934704147279263,
+    "inertia_p75_kgm2": 0.018571138381958008,
+    "time_to_20rad_s_at_16Nm_ms": 16.952705336734653
+   },
+   "l_calf": {
+    "samples": 5928,
+    "inertia_median_kgm2": 0.007609537336975336,
+    "inertia_p25_kgm2": 0.004477374721318483,
+    "inertia_p75_kgm2": 0.015384395606815815,
+    "time_to_20rad_s_at_16Nm_ms": 9.51192167121917
+   },
+   "l_ankle_pitch": {
+    "samples": 2468,
+    "inertia_median_kgm2": 0.1969677209854126,
+    "inertia_p25_kgm2": 0.11384285241365433,
+    "inertia_p75_kgm2": 0.4431194067001343,
+    "time_to_20rad_s_at_16Nm_ms": 246.20965123176575
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "it_4500": {
+   "r_hip_pitch": {
+    "samples": 9604,
+    "inertia_median_kgm2": 0.07412047684192657,
+    "inertia_p25_kgm2": 0.03670050948858261,
+    "inertia_p75_kgm2": 0.11792226135730743,
+    "time_to_20rad_s_at_16Nm_ms": 92.65059605240822
+   },
+   "r_hip_roll": {
+    "samples": 886,
+    "inertia_median_kgm2": 0.05490240454673767,
+    "inertia_p25_kgm2": 0.03504158556461334,
+    "inertia_p75_kgm2": 0.0730544924736023,
+    "time_to_20rad_s_at_16Nm_ms": 68.62800568342209
+   },
+   "r_thigh": {
+    "samples": 2,
+    "inertia_median_kgm2": 0.017572008073329926,
+    "inertia_p25_kgm2": 0.013761335983872414,
+    "inertia_p75_kgm2": 0.021382678300142288,
+    "time_to_20rad_s_at_16Nm_ms": 21.965010091662407
+   },
+   "r_calf": {
+    "samples": 1027,
+    "inertia_median_kgm2": 0.00850086472928524,
+    "inertia_p25_kgm2": 0.005501319654285908,
+    "inertia_p75_kgm2": 0.01290014199912548,
+    "time_to_20rad_s_at_16Nm_ms": 10.62608091160655
+   },
+   "r_ankle_pitch": {
+    "samples": 4024,
+    "inertia_median_kgm2": 0.15946295857429504,
+    "inertia_p25_kgm2": 0.0020075892098248005,
+    "inertia_p75_kgm2": 0.35191959142684937,
+    "time_to_20rad_s_at_16Nm_ms": 199.3286982178688
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 7394,
+    "inertia_median_kgm2": 0.041425712406635284,
+    "inertia_p25_kgm2": 0.029792875051498413,
+    "inertia_p75_kgm2": 0.06006871908903122,
+    "time_to_20rad_s_at_16Nm_ms": 51.782140508294106
+   },
+   "l_hip_roll": {
+    "samples": 836,
+    "inertia_median_kgm2": 0.04287620261311531,
+    "inertia_p25_kgm2": 0.01531505398452282,
+    "inertia_p75_kgm2": 0.09121453762054443,
+    "time_to_20rad_s_at_16Nm_ms": 53.59525326639414
+   },
+   "l_thigh": {
+    "samples": 16,
+    "inertia_median_kgm2": 0.013532306998968124,
+    "inertia_p25_kgm2": 0.009947067126631737,
+    "inertia_p75_kgm2": 0.016705110669136047,
+    "time_to_20rad_s_at_16Nm_ms": 16.915383748710155
+   },
+   "l_calf": {
+    "samples": 5878,
+    "inertia_median_kgm2": 0.013179386965930462,
+    "inertia_p25_kgm2": 0.003726488444954157,
+    "inertia_p75_kgm2": 0.024030718952417374,
+    "time_to_20rad_s_at_16Nm_ms": 16.474233707413077
+   },
+   "l_ankle_pitch": {
+    "samples": 3687,
+    "inertia_median_kgm2": 0.2556878924369812,
+    "inertia_p25_kgm2": 0.1297284960746765,
+    "inertia_p75_kgm2": 0.5506822466850281,
+    "time_to_20rad_s_at_16Nm_ms": 319.6098655462265
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "counterfactual_it3000_rate0p3": {
+   "r_hip_pitch": {
+    "samples": 9682,
+    "inertia_median_kgm2": 0.03594861924648285,
+    "inertia_p25_kgm2": 0.01555139571428299,
+    "inertia_p75_kgm2": 0.08621340990066528,
+    "time_to_20rad_s_at_16Nm_ms": 44.93577405810356
+   },
+   "r_hip_roll": {
+    "samples": 249,
+    "inertia_median_kgm2": 0.05976889282464981,
+    "inertia_p25_kgm2": 0.037449561059474945,
+    "inertia_p75_kgm2": 0.09070003777742386,
+    "time_to_20rad_s_at_16Nm_ms": 74.71111603081226
+   },
+   "r_thigh": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "r_calf": {
+    "samples": 15126,
+    "inertia_median_kgm2": 0.07429727911949158,
+    "inertia_p25_kgm2": 0.03836354613304138,
+    "inertia_p75_kgm2": 0.12584275007247925,
+    "time_to_20rad_s_at_16Nm_ms": 92.87159889936447
+   },
+   "r_ankle_pitch": {
+    "samples": 1742,
+    "inertia_median_kgm2": 0.12083100527524948,
+    "inertia_p25_kgm2": 0.07251786440610886,
+    "inertia_p75_kgm2": 0.21662186086177826,
+    "time_to_20rad_s_at_16Nm_ms": 151.03875659406185
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 7613,
+    "inertia_median_kgm2": 0.06216851621866226,
+    "inertia_p25_kgm2": 0.023881610482931137,
+    "inertia_p75_kgm2": 0.7588086128234863,
+    "time_to_20rad_s_at_16Nm_ms": 77.71064527332783
+   },
+   "l_hip_roll": {
+    "samples": 422,
+    "inertia_median_kgm2": 0.058739885687828064,
+    "inertia_p25_kgm2": 0.02916942723095417,
+    "inertia_p75_kgm2": 0.10180722922086716,
+    "time_to_20rad_s_at_16Nm_ms": 73.42485710978508
+   },
+   "l_thigh": {
+    "samples": 98,
+    "inertia_median_kgm2": 0.009656282141804695,
+    "inertia_p25_kgm2": 0.007274013478308916,
+    "inertia_p75_kgm2": 0.020682750269770622,
+    "time_to_20rad_s_at_16Nm_ms": 12.070352677255869
+   },
+   "l_calf": {
+    "samples": 12027,
+    "inertia_median_kgm2": 0.02323703095316887,
+    "inertia_p25_kgm2": 0.013107497245073318,
+    "inertia_p75_kgm2": 0.8617559671401978,
+    "time_to_20rad_s_at_16Nm_ms": 29.046288691461086
+   },
+   "l_ankle_pitch": {
+    "samples": 437,
+    "inertia_median_kgm2": 0.0962175726890564,
+    "inertia_p25_kgm2": 0.05990349128842354,
+    "inertia_p75_kgm2": 0.19571593403816223,
+    "time_to_20rad_s_at_16Nm_ms": 120.2719658613205
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "counterfactual_it3000_rate0p2": {
+   "r_hip_pitch": {
+    "samples": 2514,
+    "inertia_median_kgm2": 0.05453859269618988,
+    "inertia_p25_kgm2": 0.030255021527409554,
+    "inertia_p75_kgm2": 0.0880347192287445,
+    "time_to_20rad_s_at_16Nm_ms": 68.17324087023735
+   },
+   "r_hip_roll": {
+    "samples": 29,
+    "inertia_median_kgm2": 0.050381410866975784,
+    "inertia_p25_kgm2": 0.045148562639951706,
+    "inertia_p75_kgm2": 0.056187573820352554,
+    "time_to_20rad_s_at_16Nm_ms": 62.97676358371973
+   },
+   "r_thigh": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "r_calf": {
+    "samples": 7848,
+    "inertia_median_kgm2": 0.08006435632705688,
+    "inertia_p25_kgm2": 0.04906332865357399,
+    "inertia_p75_kgm2": 0.13187451660633087,
+    "time_to_20rad_s_at_16Nm_ms": 100.0804454088211
+   },
+   "r_ankle_pitch": {
+    "samples": 155,
+    "inertia_median_kgm2": 0.10814984142780304,
+    "inertia_p25_kgm2": 0.09993919730186462,
+    "inertia_p75_kgm2": 0.2814303934574127,
+    "time_to_20rad_s_at_16Nm_ms": 135.1873017847538
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 11780,
+    "inertia_median_kgm2": 0.48112404346466064,
+    "inertia_p25_kgm2": 0.1817018985748291,
+    "inertia_p75_kgm2": 1.4864616394042969,
+    "time_to_20rad_s_at_16Nm_ms": 601.4050543308258
+   },
+   "l_hip_roll": {
+    "samples": 646,
+    "inertia_median_kgm2": 0.07485628873109818,
+    "inertia_p25_kgm2": 0.04617707058787346,
+    "inertia_p75_kgm2": 0.1002853587269783,
+    "time_to_20rad_s_at_16Nm_ms": 93.57036091387272
+   },
+   "l_thigh": {
+    "samples": 97,
+    "inertia_median_kgm2": 0.007880942896008492,
+    "inertia_p25_kgm2": 0.007215365767478943,
+    "inertia_p75_kgm2": 0.01060640998184681,
+    "time_to_20rad_s_at_16Nm_ms": 9.851178620010614
+   },
+   "l_calf": {
+    "samples": 57392,
+    "inertia_median_kgm2": 14.957891464233398,
+    "inertia_p25_kgm2": 1.7693281173706055,
+    "inertia_p75_kgm2": 4762.5947265625,
+    "time_to_20rad_s_at_16Nm_ms": 18697.364330291748
+   },
+   "l_ankle_pitch": {
+    "samples": 31,
+    "inertia_median_kgm2": 0.12799610197544098,
+    "inertia_p25_kgm2": 0.08069150149822235,
+    "inertia_p75_kgm2": 0.19510100781917572,
+    "time_to_20rad_s_at_16Nm_ms": 159.99512746930122
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  },
+  "counterfactual_it3000_rate0p1": {
+   "r_hip_pitch": {
+    "samples": 55,
+    "inertia_median_kgm2": 0.13970710337162018,
+    "inertia_p25_kgm2": 0.07126912474632263,
+    "inertia_p75_kgm2": 0.20456932485103607,
+    "time_to_20rad_s_at_16Nm_ms": 174.63387921452522
+   },
+   "r_hip_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "r_thigh": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "r_calf": {
+    "samples": 53,
+    "inertia_median_kgm2": 0.10876744985580444,
+    "inertia_p25_kgm2": 0.04039305821061134,
+    "inertia_p75_kgm2": 0.14926637709140778,
+    "time_to_20rad_s_at_16Nm_ms": 135.95931231975555
+   },
+   "r_ankle_pitch": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "r_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_hip_pitch": {
+    "samples": 456,
+    "inertia_median_kgm2": 0.7463327646255493,
+    "inertia_p25_kgm2": 0.3300607204437256,
+    "inertia_p75_kgm2": 1.798901081085205,
+    "time_to_20rad_s_at_16Nm_ms": 932.9159557819366
+   },
+   "l_hip_roll": {
+    "samples": 20,
+    "inertia_median_kgm2": 0.08169373869895935,
+    "inertia_p25_kgm2": 0.06975040584802628,
+    "inertia_p75_kgm2": 0.09586457163095474,
+    "time_to_20rad_s_at_16Nm_ms": 102.11717337369919
+   },
+   "l_thigh": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_calf": {
+    "samples": 50975,
+    "inertia_median_kgm2": 13.99425220489502,
+    "inertia_p25_kgm2": 4.378806114196777,
+    "inertia_p75_kgm2": 105.3118896484375,
+    "time_to_20rad_s_at_16Nm_ms": 17492.815256118774
+   },
+   "l_ankle_pitch": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   },
+   "l_ankle_roll": {
+    "samples": 0,
+    "inertia_median_kgm2": NaN,
+    "inertia_p25_kgm2": NaN,
+    "inertia_p75_kgm2": NaN,
+    "time_to_20rad_s_at_16Nm_ms": NaN
+   }
+  }
+ }
+}

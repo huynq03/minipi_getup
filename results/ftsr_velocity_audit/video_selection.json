@@ -1,0 +1,31 @@
+{
+ "3000": {
+  "success_high_qd": {
+   "env": 13,
+   "peak_qd": 46.93053436279297,
+   "class": "success"
+  },
+  "success_low_qd": {
+   "env": 4,
+   "peak_qd": 27.834131240844727,
+   "class": "success"
+  }
+ },
+ "3500": {
+  "success_high_qd": {
+   "env": 13,
+   "peak_qd": 45.34412384033203,
+   "class": "success"
+  },
+  "success_low_qd": {
+   "env": 2,
+   "peak_qd": 25.827531814575195,
+   "class": "success"
+  },
+  "failed": {
+   "env": 49,
+   "peak_qd": 39.968223571777344,
+   "class": "failed"
+  }
+ }
+}

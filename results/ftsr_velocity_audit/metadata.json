@@ -1,0 +1,112 @@
+{
+ "repository": "/home/huy/minipi_getup_ftsr (git worktree of /home/huy/minipi_getup), branch ftsr-only",
+ "code_commit_at_rollout": "31cb1f4 (training code); audit script src/minipi_getup/ftsr_ref/velocity_audit.py (evaluation only, committed with these results)",
+ "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless, play cfg (no observation noise), ZERO assistance",
+ "policy": "student encoder + actor, deterministic (mean action)",
+ "seed": 2150,
+ "episodes_per_checkpoint": 128,
+ "per_pose": 32,
+ "poses": [
+  "supine",
+  "prone",
+  "left_side",
+  "right_side"
+ ],
+ "pose_assignment": "env_id % 4 (by_env_index)",
+ "reset_noise": "euler 0.3 rad, joints 0.3 rad (training reset event), seeded",
+ "episode": "20 s = 2 s passive (kp 0, kd 1) + 18 s policy; 999 policy steps recorded",
+ "simulation": {
+  "physics_dt_s": 0.0005,
+  "decimation": 40,
+  "policy_dt_s": 0.02,
+  "integrator": "implicitfast (3)",
+  "cone": "elliptic (1)",
+  "impratio": 10.0,
+  "plant": "MuJoCo position actuator, tau = clip(kp (q*-q) - kd qd, +-16 Nm); no torque-speed envelope; no target slew",
+  "kp": [
+   60,
+   40,
+   20,
+   60,
+   30,
+   10,
+   60,
+   40,
+   20,
+   60,
+   30,
+   10
+  ],
+  "kd": [
+   2.4,
+   0.8,
+   0.4,
+   2.8,
+   1.6,
+   0.3,
+   2.4,
+   0.8,
+   0.4,
+   2.8,
+   1.6,
+   0.3
+  ],
+  "armature": 0.0,
+  "joint_damping": 0.0,
+  "frictionloss": 0.0,
+  "joint_limit_solref": [
+   0.02,
+   1.0
+  ],
+  "joint_limit_solimp": [
+   0.9,
+   0.95,
+   0.001,
+   0.5,
+   2.0
+  ]
+ },
+ "reward_attribution": "reward table stage fixed to r_w (stage 2) during the audit = the training population's stage (S1/S2 ~0.87); no effect on dynamics (no assistance in play)",
+ "recording": "physics-step (0.5 ms): q, qd, actuator force, unclipped PD torque (pre-step state), joint-space constraint force, base height, uprightness, ground-contact groups; policy-step: q*, unclipped command, action, qpos, every reward term, validity flags",
+ "definitions": {
+  "recovered": "mean base height over the last 3 s > h1 = 0.19 m and mean upright cos > cos 18 deg (as analyze_recovery / periodic eval)",
+  "strict": "base > 0.31 m and upright within 18 deg at every step of the last 3 s",
+  "invalid": "action-term non-finite flag, nan termination or non-finite qd in the episode (none observed)",
+  "phases": "A: policy start -> first base > h1; B: -> first base > h2 (0.276 m); C: -> first 0.5 s continuously > h2 and upright; D: after (first crossings; regressions reported separately)",
+  "spike_event": "contiguous physics steps with |qd| > 20 rad/s on one joint",
+  "large_target_jump": ">= 0.25 rad change of q* in one 20 ms policy step (alone commands >= 12.5 rad/s)",
+  "limit_violation": "physical joint position beyond the XML range by > 5 mrad (not commanded-target clipping)"
+ },
+ "checkpoints": {
+  "2500": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-08_23-51-06_ftsr_recovery_pd16_noslew/model_2500.pt",
+   "sha256": "1f27e638fe79c7b803b2f0a38623610992ed06250fd7bd9b575a1ba33773122d"
+  },
+  "3000": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3000.pt",
+   "sha256": "5ccf02e11760a2a9cbef1d18a84e63c9a3be4138ff9544c3f4a1cb6678e9464b"
+  },
+  "3500": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_3500.pt",
+   "sha256": "c723d1a05e2adf11a03179d4b100f8aa4405d07303341209a272b91218d41207"
+  },
+  "4000": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4000.pt",
+   "sha256": "408df87e06b9fa49659fd98fb971c18fcc27814c53d5d164e97c4b4e43d20ad3"
+  },
+  "4500": {
+   "path": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700/model_4500.pt",
+   "sha256": "fdfb5b120be1894b157a3e84dd8670c782fba4086aec7cda585b914430243cd9"
+  }
+ },
+ "best_autonomous_checkpoint": "model_3000 (periodic eval best_recovery.json: 99.6 % over 64 envs/pose; 100 % here)",
+ "counterfactuals": "counterfactual_it3000_rate0p{1,2,3}: model_3000 with an evaluation-only PD-target rate limit of 0.1/0.2/0.3 rad per policy step (not the training plant)",
+ "commands": [
+  "python -m minipi_getup.ftsr_ref.velocity_audit rollout --checkpoint <ckpt> --out results/ftsr_velocity_audit/runs/it_<N> --per-pose 32 --seed 2150",
+  "python -m minipi_getup.ftsr_ref.velocity_audit rollout --checkpoint <model_3000> --out results/ftsr_velocity_audit/runs/counterfactual_it3000_rate0pX --per-pose 32 --target-rate-limit 0.X",
+  "python -m minipi_getup.ftsr_ref.velocity_audit analyze --runs <runs...> --primary runs/it_3000 runs/it_3500 --out results/ftsr_velocity_audit",
+  "python -m minipi_getup.ftsr_ref.velocity_audit videos --run runs/it_3000 --out results/ftsr_velocity_audit (and it_3500)"
+ ],
+ "raw_data": "runs/*/rollout.npz (~0.9 GB each, git-ignored, kept locally)",
+ "training_interaction": "training (ftsr_recovery_pd16_noslew_resume2700) was never stopped; audit rollouts ran concurrently (one at a time), iteration time rose from ~3.3 s to up to ~6.5 s during overlapping windows"
+}

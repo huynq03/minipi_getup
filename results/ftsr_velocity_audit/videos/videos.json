@@ -1,0 +1,26 @@
+{
+ "success_high_qd": {
+  "env": 13,
+  "pose": "prone",
+  "realtime": "results/ftsr_velocity_audit/videos/it3500_success_high_qd_env13_realtime.mp4",
+  "slow_0p2x": "results/ftsr_velocity_audit/videos/it3500_success_high_qd_env13_slow0p2x.mp4",
+  "peak_qd": 45.34412384033203,
+  "class": "success"
+ },
+ "success_low_qd": {
+  "env": 2,
+  "pose": "left_side",
+  "realtime": "results/ftsr_velocity_audit/videos/it3500_success_low_qd_env2_realtime.mp4",
+  "slow_0p2x": "results/ftsr_velocity_audit/videos/it3500_success_low_qd_env2_slow0p2x.mp4",
+  "peak_qd": 25.827531814575195,
+  "class": "success"
+ },
+ "failed": {
+  "env": 49,
+  "pose": "prone",
+  "realtime": "results/ftsr_velocity_audit/videos/it3500_failed_env49_realtime.mp4",
+  "slow_0p2x": "results/ftsr_velocity_audit/videos/it3500_failed_env49_slow0p2x.mp4",
+  "peak_qd": 39.968223571777344,
+  "class": "failed"
+ }
+}
