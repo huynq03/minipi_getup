@@ -105,3 +105,73 @@ falls in training after it ~150. Final rewards /s: height 4.90, lin_vel 6.80, ya
 Note: the walking init ends with std 0.07 (v0 walk init: 0.31 at recovery start), so
 recovery starts with little exploration; the entropy bonus (0.01, unchanged) is the
 only mechanism that raises it. Watched, not changed.
+
+Periodic no-assist evaluations (deterministic student, 64 envs per pose, seed 2150;
+recovered = last 3 s base > h1 and tilt < 18 deg):
+
+| it | recovered mean | supine | prone | left | right |
+|---|---|---|---|---|---|
+| 500, 1000, 1500, 2000 | 0 % | 0 | 0 | 0 | 0 |
+| 2500 | 41.4 % | 52 % | 23 % | 48 % | 42 % |
+
+`best_recovery_model.pt` = model_2500 (v2 model_2150: about 13 %).
+
+### Stop at iteration 2700: non-finite constraint cost (physics explosion)
+
+Training stopped at iteration 2700 (tc 0.10) with `persistent non-finite ppo updates
+(20/20 minibatches)`. The guard worked as designed; `model_2700.pt` and all parameters
+are finite. Dump `nonfinite_ppo_it2700.json`: rewards, returns, values, observations,
+log-probs and ratios finite; 5 non-finite advantages in the dumped minibatch.
+
+Cause: one env's physics state became non-finite within a substep (joint speeds of
+44-48 rad/s occur in this plant). mjlab handled the env itself (`nan` termination
+reset it, the reward manager zeroed its non-finite rewards), but the Eq. 4 constraint
+cost accumulated in `FtsrJointAction.apply_actions` from that substep's base height /
+orientation was NaN. `discounted_cost_to_go` propagated it backwards through the
+episode, so `A_bar` (Eq. 8) and every PPO loss were NaN. The v2 crash at iteration
+2279 (NaN actor parameters, before the guard existed) very likely had the same cause.
+
+Fix (commit 9a6796a; the objective is unchanged on finite data):
+
+1. Source: an env with non-finite q, qd, actuator force or Eq. 4 wrench in any substep
+   is flagged invalid for the policy step; its wrench and costs are zero; it is kept
+   out of the substep monitor.
+2. Storage (second guard): a non-finite reward, value or cost also makes the sample
+   invalid. Invalid samples truncate the trajectory at the start of their step
+   (advantage 0; the previous step bootstraps V(s_t) of the finite pre-step
+   observation), carry no cost and are excluded from advantage standardization.
+3. PPO: surrogate, value loss, entropy and KL are averaged over valid samples only
+   when an invalid sample exists; otherwise the original code runs. Invalid episodes
+   are left out of the reward statistics. The env itself is reset by mjlab's `nan`
+   termination; an explosion is never a successful or valid transition.
+4. Logging: every explosion is printed (`PHYSICS EXPLOSION`, env ids, pre-explosion
+   max |qd| and base height) and appended to `RUN/explosions.jsonl`; TensorBoard
+   `Loss/numerics_*`, `FTSR/invalid_samples`, `FTSR/nonfinite_cost_samples`,
+   `Loss/skipped_minibatches`; terminal `inv` (envs) and `skip` (minibatches).
+5. Stop rule: more than 8 envs exploding in one iteration, or explosions in more than
+   5 of the last 100 iterations, raises with a report (last checkpoint intact).
+
+Validation 32/32 (tests 30-32 new): poisoned env flagged, zero cost, nan-terminated
+and reset, valid in the next step, monitor finite; storage returns / advantages on
+all-valid rollouts bitwise equal to the pre-fix code (36c1bc6), with and without
+Eq. 8; a NaN sample gives finite advantages, 0 at that sample, and results
+independent of its contents; the PPO update on an all-valid rollout is bitwise equal
+to the pre-fix `_update`, and with an invalid sample it is finite and independent of
+that sample. (Two separate GPU env instances differ by ~1e-3 even without poisoning,
+so test 30 checks the sanitation identity on the clean tensors instead of a twin
+comparison.)
+
+### Resume from model_2700 (2026-10-09 08:33)
+
+`tools/ftsr_pd16_resume.sh`: `--agent.resume True --agent.load-run
+2026-10-08_23-51-06_ftsr_recovery_pd16_noslew --agent.load-checkpoint model_2700.pt
+--agent.max-iterations 5300` (to 8000). Restored: networks, both Adam states, adaptive
+lr, iteration 2700, env step counter (tc 0.094 at it 2718, continuing the schedule),
+RNG states; the stage is recomputed (stateless). Not restorable: the physics state of
+the 4000 envs (fresh resets with random episode phases), so the first reported
+episode rewards after resume are from short episodes. New run dir
+`logs/rsl_rl/minipi_ftsr_ref/2026-10-09_08-33-09_ftsr_recovery_pd16_noslew_resume2700`
+(log `logs/ftsr_recovery_pd16_noslew_resume2700.log`), which starts with the original
+best record (model_2500) and evaluations; evaluations at 2750, 3000, 3500, then every
+500. Unchanged: plant, torque cap, qd penalty, rewards, stage thresholds, PPO, assist
+schedule.
