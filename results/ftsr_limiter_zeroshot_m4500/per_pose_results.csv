@@ -1,0 +1,17 @@
+limit,pose,recovered,strict,foot_only,reach_h1,h2_given_h1,time_median_s,time_p95_s,failures
+0.3,supine,1.0,1.0,1.0,1.0,1.0,0.4,0.8200000000000001,
+0.3,prone,1.0,1.0,1.0,1.0,1.0,0.52,1.2629999999999981,
+0.3,left_side,1.0,1.0,1.0,1.0,1.0,0.53,0.8059999999999997,
+0.3,right_side,1.0,1.0,1.0,1.0,1.0,0.48,1.5459999999999963,
+0.2,supine,1.0,1.0,1.0,1.0,1.0,0.7000000000000001,1.08,
+0.2,prone,1.0,0.9921875,1.0,1.0,1.0,2.33,6.374999999999997,
+0.2,left_side,1.0,1.0,1.0,1.0,1.0,0.86,5.164999999999999,
+0.2,right_side,1.0,1.0,1.0,1.0,1.0,1.05,3.9389999999999996,
+0.15,supine,0.9921875,0.984375,0.9921875,1.0,1.0,0.98,1.9479999999999995,"fell_after_recovery (held 1 s, then down) 0.8%"
+0.15,prone,0.734375,0.7265625,0.734375,1.0,0.9453125,6.59,13.747,"fell_after_recovery (held 1 s, then down) 0.8%; high_but_tilted (final > h1, tilt > 18 deg) 4.7%; reached_h1_not_held 21.1%"
+0.15,left_side,0.796875,0.7890625,0.796875,1.0,0.9453125,1.17,10.924999999999994,"fell_after_recovery (held 1 s, then down) 2.3%; high_but_tilted (final > h1, tilt > 18 deg) 3.1%; reached_h1_not_held 14.8%"
+0.15,right_side,0.890625,0.890625,0.890625,1.0,0.984375,1.53,11.671999999999999,"high_but_tilted (final > h1, tilt > 18 deg) 5.5%; reached_h1_not_held 5.5%"
+0.1,supine,0.5390625,0.5390625,0.5390625,0.8515625,0.7614678899082569,8.540000000000001,13.7,"fell_after_recovery (held 1 s, then down) 7.0%; high_but_tilted (final > h1, tilt > 18 deg) 2.3%; never_lift (max h < 0.15 m) 0.8%; partial_lift (0.15 m <= max h < h1) 14.1%; reached_h1_not_held 21.9%"
+0.1,prone,0.03125,0.03125,0.03125,0.640625,0.04878048780487805,10.920000000000002,14.237,partial_lift (0.15 m <= max h < h1) 35.9%; reached_h1_not_held 60.9%
+0.1,left_side,0.3046875,0.2890625,0.3046875,0.7890625,0.45544554455445546,5.84,14.912,"fell_after_recovery (held 1 s, then down) 3.9%; high_but_tilted (final > h1, tilt > 18 deg) 0.8%; partial_lift (0.15 m <= max h < h1) 21.1%; reached_h1_not_held 43.8%"
+0.1,right_side,0.3515625,0.34375,0.3515625,0.71875,0.5543478260869565,9.1,14.512,"fell_after_recovery (held 1 s, then down) 2.3%; high_but_tilted (final > h1, tilt > 18 deg) 0.8%; never_lift (max h < 0.15 m) 0.8%; partial_lift (0.15 m <= max h < h1) 27.3%; reached_h1_not_held 33.6%"

@@ -1,0 +1,28 @@
+{
+ "checkpoint": "logs/rsl_rl/minipi_ftsr_ref/2026-10-09_17-45-30_ftsr_limit0p3_ft4000/model_4500.pt",
+ "sha256": "aea114e1e1ce4396624d81bb6bba2e068236c9a815d1f88b96d723e496f7e1ba",
+ "task": "Mjlab-FTSR-Ref-MiniPi-Recovery-Stateless (play cfg) + evaluation-wrapper limiter",
+ "limits": [
+  0.3,
+  0.2,
+  0.15,
+  0.1
+ ],
+ "seed": 2150,
+ "episodes_per_pose": 128,
+ "poses": [
+  "supine",
+  "prone",
+  "left_side",
+  "right_side"
+ ],
+ "policy": "student, deterministic",
+ "assist": null,
+ "runs": {
+  "L0p3": "L0p3/runs/it4500_limited_s2150",
+  "L0p2": "L0p2/runs/it4500_limited_s2150",
+  "L0p15": "L0p15/runs/it4500_limited_s2150",
+  "L0p1": "L0p1/runs/it4500_limited_s2150"
+ },
+ "code_commit_before_results": "see git log (limiter_eval q_cmd recording + compare)"
+}

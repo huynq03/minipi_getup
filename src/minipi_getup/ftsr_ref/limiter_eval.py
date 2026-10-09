@@ -140,6 +140,8 @@ def rollout(args) -> None:
   qd_u16 = np.zeros((S, n, nj), np.uint16)
   pol = {
     "q_star": np.zeros((T, n, nj), np.float32),
+    # Range-clipped policy command before the limiter (= q_star without limiter).
+    "q_cmd": np.zeros((T, n, nj), np.float32),
     "q": np.zeros((T, n, nj), np.float32),
     "qd_step_max": np.zeros((T, n, nj), np.float16),
     "viol_step_max": np.zeros((T, n, nj), np.float16),
@@ -255,6 +257,7 @@ def rollout(args) -> None:
       pol["sat_count"][k] = (atau >= SAT).sum((0, 2)).cpu().numpy()
       pol["root_f_peak"][k] = g["rf"].amax(0).cpu().numpy()
       pol["q_star"][k] = t.q_star.cpu().numpy()
+      pol["q_cmd"][k] = t.q_cmd.cpu().numpy()
       pol["q"][k] = q[-1].cpu().numpy()
       d = robot.data
       pol["h"][k] = (d.root_link_pos_w[:, 2] - origin_z).cpu().numpy()
@@ -1093,6 +1096,157 @@ def videos_selected(args) -> None:
   print("[videos_selected] done", flush=True)
 
 
+def compare(args) -> None:
+  """Compare runs of ONE checkpoint at different limits (same seed / initial states):
+  one table per pose, one summary table, failure diagnostics and one figure."""
+  roots = args.runs
+  rows, pose_rows, diag = [], [], {}
+  pltdata = {}
+  q0 = None
+  for d in roots:
+    m = json.load(open(os.path.join(d, "meta.json")))
+    st = json.load(open(os.path.join(d, "stats.json")))
+    z = np.load(os.path.join(d, "run.npz"))
+    q0 = z["init_qpos"] if q0 is None else q0
+    same_init = float(np.abs(z["init_qpos"] - q0).max())
+    lim = m["limit_rad_per_step"]
+    dt, P, dec = m["policy_dt"], m["passive_steps"], m["decimation"]
+    nj = len(JOINT_NAMES)
+    ph, h = z["ph"], z["h"]
+    act = ph >= 0
+    rec = np.array(st["per_env"]["recovered"], bool)
+    hist = z["hist"]
+    o = st["overall"]
+    # Limiter active: q* differs from the range-clipped command.
+    cut = np.abs(z["q_star"] - z["q_cmd"]) > 1e-6  # (T, n, nj)
+    gap = np.abs(z["q_cmd"] - z["q_star"])
+    trk = np.abs(z["q_star"] - z["q"])
+    sat = z["sat_count"] / float(dec * nj)
+
+    def frac(x, mask):
+      mm = np.broadcast_to(mask[..., None], x.shape) if x.ndim == 3 else mask
+      return float(x[mm].mean()) if mm.any() else float("nan")
+
+    row = {
+      "limit": lim,
+      "same_init_max_abs": same_init,
+      "recovery": o["recovered"],
+      "worst_pose": min(v["recovered"] for v in st["per_pose"].values()),
+      "strict": o["strict_0p31"],
+      "foot_only": o["foot_only_stable"],
+      "time_median_s": o["recover_time_median_s"],
+      "time_p95_s": o["recover_time_p95_s"],
+      "events_gt20_per_ep": o["events_gt20_per_episode"],
+      "tau_sat_frac": o["tau_sat_frac"],
+      "viol_max": o["viol_max"],
+      "viol_p99_ep": o["viol_p99_episode"],
+      "ep_viol_gt_0p05": o["episodes_viol_gt_0p05"],
+      "limiter_active": frac(cut, act),
+      "invalid_episodes": o["invalid_episodes"],
+    }
+    for gi, gname in enumerate(GROUPS):
+      hh = hist[gi].sum(0)
+      row[f"{gname}_p99"] = hist_quantile(hh, 99)
+      row[f"{gname}_max"] = _hmax(hh)
+      if gi < 4:
+        row[f"{gname}_limiter_active"] = frac(cut, ph == gi)
+    rows.append(row)
+    for name, v in st["per_pose"].items():
+      pose_rows.append(
+        {
+          "limit": lim,
+          "pose": name,
+          "recovered": v["recovered"],
+          "strict": v["strict_0p31"],
+          "foot_only": v["foot_only_stable"],
+          "reach_h1": v["reach_h1"],
+          "h2_given_h1": v["h2_given_h1"],
+          "time_median_s": v["recover_time_median_s"],
+          "time_p95_s": v["recover_time_p95_s"],
+          "failures": "; ".join(
+            f"{k} {100 * x:.1f}%"
+            for k, x in v["categories"].items()
+            if k != "recovered"
+          ),
+        }
+      )
+    # Failure diagnostics: successes vs failures over the actuated window.
+    vz = np.diff(h, axis=0, prepend=h[:1]) / dt  # base vertical speed (m/s)
+    h0 = h[P - 1]
+    rise = h > (h0 + 0.02)[None]
+    k_rise = np.where((rise & act).any(0), (rise & act).argmax(0), -1)
+    k_h1 = np.where(((h > H1) & act).any(0), ((h > H1) & act).argmax(0), -1)
+    g = {}
+    for lab, sel in (("success", rec), ("failure", ~rec)):
+      if not sel.any():
+        continue
+      a = act & sel[None]
+      pre = a & (ph <= 2)  # get-up attempt (A-C)
+      wait = (k_rise[sel] - P) * dt
+      lift = (k_h1[sel] - k_rise[sel]) * dt
+      okl = (k_rise[sel] >= 0) & (k_h1[sel] >= 0)
+      g[lab] = {
+        "episodes": int(sel.sum()),
+        "categories": dict(
+          zip(
+            *np.unique(np.array(st["per_env"]["cat"])[sel], return_counts=True),
+            strict=True,
+          )
+        ),
+        "reached_h1": float((k_h1[sel] >= 0).mean()),
+        "max_h_median": float(np.median(h[:, sel][P:].max(0))),
+        "limiter_active_A_C": frac(cut, pre),
+        "command_gap_mean_rad_A_C": frac(gap, pre),
+        "tracking_err_mean_rad_A_C": frac(trk, pre),
+        "tau_sat_frac_A_C": float(sat[pre].mean()) if pre.any() else float("nan"),
+        "tau_sat_frac_all": float(sat[a].mean()),
+        "wait_before_rise_s_median": float(np.median(wait[k_rise[sel] >= 0]))
+        if (k_rise[sel] >= 0).any()
+        else None,
+        "rise_to_h1_s_median": float(np.median(lift[okl])) if okl.any() else None,
+        "peak_vz_before_h1_median": float(
+          np.median(
+            [
+              vz[P : (k_h1[e] if k_h1[e] >= 0 else len(h)), e].max()
+              for e in np.nonzero(sel)[0]
+            ]
+          )
+        ),
+      }
+    g["categories_note"] = "analyze_recovery categories over failures"
+    diag[f"{lim}"] = g
+    pltdata[lim] = {"rec": rec, "h": h, "P": P, "dt": dt, "pose": z["pose"]}
+  os.makedirs(args.out, exist_ok=True)
+  _csv(os.path.join(args.out, "limit_comparison.csv"), rows)
+  _csv(os.path.join(args.out, "per_pose_results.csv"), pose_rows)
+  with open(os.path.join(args.out, "failure_diagnostics.json"), "w") as f:
+    json.dump(
+      diag, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x)
+    )
+  # One figure: base height of every episode per limit (success / failure).
+  plt = _style()
+  lims = sorted(pltdata, reverse=True)
+  fig, axs = plt.subplots(1, len(lims), figsize=(3.6 * len(lims), 3.2), sharey=True)
+  for ax, lim in zip(np.atleast_1d(axs), lims, strict=True):
+    dd = pltdata[lim]
+    t = (np.arange(dd["h"].shape[0]) + 1) * dd["dt"] - dd["P"] * dd["dt"]
+    for e in range(dd["h"].shape[1]):
+      ax.plot(
+        t, dd["h"][:, e], lw=0.3, alpha=0.25, color=C_LIM if dd["rec"][e] else "#b33"
+      )
+    ax.axhline(H1, color="#2a9d8f", lw=0.7, ls="--")
+    ax.axhline(H2, color="#e76f51", lw=0.7, ls="--")
+    ax.set_xlim(-0.5, 18)
+    ax.set_title(f"limit {lim} rad/step: {100 * dd['rec'].mean():.1f} % recovered")
+    ax.set_xlabel("time after passive window (s)")
+  np.atleast_1d(axs)[0].set_ylabel("base height (m); red = not recovered")
+  fig.tight_layout()
+  os.makedirs(os.path.join(args.out, "plots"), exist_ok=True)
+  fig.savefig(os.path.join(args.out, "plots", "report.png"))
+  plt.close(fig)
+  print("[compare] done", flush=True)
+
+
 def main() -> None:
   ap = argparse.ArgumentParser()
   sp = ap.add_subparsers(dest="cmd", required=True)
@@ -1118,8 +1272,12 @@ def main() -> None:
   vs.add_argument("--run", required=True)
   vs.add_argument("--out", required=True)
   vs.add_argument("--label", default="")
+  cp = sp.add_parser("compare")
+  cp.add_argument("--runs", nargs="+", required=True)
+  cp.add_argument("--out", required=True)
   args = ap.parse_args()
   {
+    "compare": compare,
     "rollout": rollout,
     "report": report,
     "videos": videos,
