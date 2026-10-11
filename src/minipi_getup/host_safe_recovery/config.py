@@ -54,6 +54,9 @@ class SafeRecoveryCfg(PiCfg):
     support_transfer_upright_width = 0.15
     foot_height_center = 0.18
     foot_height_width = 0.06
+    support_rise_time_s = 0.10
+    support_decay_time_s = 0.02
+    upward_velocity_soft_m_s = 0.35
 
   class constraints(PiCfg.constraints):
     class scales(PiCfg.constraints.scales):
@@ -66,6 +69,9 @@ class SafeRecoveryCfg(PiCfg):
       target_foot_load_support = 8.0
       style_nonfoot_support = -15.0
       target_foot_supported_height = 8.0
+      # Style critic weight is 1: strong cost for ballistic ascent, including
+      # takeoff after established support (20% residual cost).
+      style_ballistic_ascent = -80.0
 
 
 class SafeRecoveryPPOCfg(PiCfgPPO):

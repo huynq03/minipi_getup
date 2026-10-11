@@ -120,6 +120,22 @@ class RewardTests(unittest.TestCase):
     self.assertEqual(cost.shape, torch.Size([2]))
     self.assertTrue(torch.isfinite(cost).all())
 
+  def test_sustained_support_increases_height_credit_without_removing_early_signal(self):
+    env = self.make_env()
+    env.cfg.safe_recovery.foot_height_center = 0.18
+    env.cfg.safe_recovery.foot_height_width = 0.06
+    env.root_states[:, 2] = 0.25
+    env._normalized_supports = lambda: (torch.ones(2), torch.ones(2), torch.zeros(2))
+    env.support_memory = torch.tensor([[0.0, 0.0], [1.0, 1.0]])
+    reward = env._reward_foot_supported_height()
+    self.assertGreater(reward[0], 0)
+    self.assertTrue(torch.allclose(reward[1], 5 * reward[0]))
+
+  def test_ballistic_cost_averages_substeps_per_environment(self):
+    env = self.make_env()
+    env.ascent_cost_history = torch.tensor([[0.0, 0.0, 0.0, 0.0], [0.0, 4.0, 0.0, 0.0]])
+    self.assertTrue(torch.equal(env._reward_ballistic_ascent(), torch.tensor([0.0, 1.0])))
+
   def test_standing_gate_is_smooth_and_state_dependent(self):
     env = self.make_env()
     env.root_states[:, 2] = torch.tensor([0.34, 0.15])

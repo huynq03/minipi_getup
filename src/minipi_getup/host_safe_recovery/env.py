@@ -70,7 +70,7 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     nonfoot_sensor = ContactSensorCfg(
       name=NONFOOT_CONTACT_SENSOR,
       primary=ContactMatch(
-        mode="geom", pattern=r"^[rl]_(calf|hip)_collision$", entity="robot"
+        mode="geom", pattern=r"^[rl]_(calf|hip|ankle_pitch|ankle_roll)_collision$", entity="robot"
       ),
       secondary=ContactMatch(mode="body", pattern="terrain"),
       fields=("found", "force"),
@@ -148,12 +148,16 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     )
     if len(self.left_sole_force_indices) != 5 or len(self.right_sole_force_indices) != 5:
       raise RuntimeError(f"unexpected sole contact geoms: {foot_names}")
-    if len(self.nonfoot_force_indices) != 4:
+    if len(self.nonfoot_force_indices) != 8:
       raise RuntimeError(f"unexpected knee/calf/hip contact geoms: {nonfoot_names}")
     self.ep_left_foot_force = torch.zeros(self.num_envs, device=self.device)
     self.ep_right_foot_force = torch.zeros(self.num_envs, device=self.device)
     self.ep_nonfoot_force = torch.zeros(self.num_envs, device=self.device)
     self.ep_both_foot_support = torch.zeros(self.num_envs, device=self.device)
+    self.support_memory = torch.zeros(self.num_envs, 2, device=self.device)
+    self.ascent_cost_history = torch.zeros(
+      self.num_envs, self.cfg.control.decimation, device=self.device
+    )
 
   def _reset_dofs(self, env_ids):
     """Random valid-ROM fallen joints; velocities begin at rest."""
@@ -258,7 +262,9 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     self.ep_left_foot_force += left_force
     self.ep_right_foot_force += right_force
     self.ep_both_foot_support += (left * right).detach()
-    return _foot_support_score(left, right)
+    stable_left = left * self.support_memory[:, 0]
+    stable_right = right * self.support_memory[:, 1]
+    return 0.5 * (left + right) + 0.5 * stable_left * stable_right
 
   def _reward_nonfoot_support(self):
     _, _, nonfoot_force = self._ground_support_forces()
@@ -284,7 +290,15 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     height = torch.sigmoid(
       (self.root_states[:, 2] - cfg.foot_height_center) / cfg.foot_height_width
     )
-    return height * _foot_support_score(left, right)
+    # Retain immediate credit while reserving most of the bonus for sustained load.
+    stable_left = left * self.support_memory[:, 0]
+    stable_right = right * self.support_memory[:, 1]
+    score = 0.2 * _foot_support_score(left, right)
+    score += 0.8 * _foot_support_score(stable_left, stable_right)
+    return height * score
+
+  def _reward_ballistic_ascent(self):
+    return self.ascent_cost_history.mean(dim=1)
 
   def _reward_joint_overspeed(self):
     excess = torch.relu(torch.abs(self.dof_vel) - self.cfg.safe_recovery.overspeed_soft_rad_s)
@@ -306,6 +320,26 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
   def _substep_monitor(self):
     self.feet_ground_sensor.update(self.cfg.sim.dt)
     self.nonfoot_ground_sensor.update(self.cfg.sim.dt)
+    left, right, _ = self._normalized_supports()
+    support = torch.stack((left, right), dim=1)
+    cfg = self.cfg.safe_recovery
+    tau = torch.where(
+      support > self.support_memory,
+      cfg.support_rise_time_s,
+      cfg.support_decay_time_s,
+    )
+    self.support_memory += (1.0 - torch.exp(-self.cfg.sim.dt / tau)) * (
+      support - self.support_memory
+    )
+    stable = (support * self.support_memory).max(dim=1).values
+    vz = self.robot.data.root_com_lin_vel_w[:, 2]
+    excess = torch.relu(vz - cfg.upward_velocity_soft_m_s)
+    # Single-foot support is allowed. Residual cost prevents a loaded foot from
+    # making a high-speed launch free; monitor every 5 ms to capture brief spikes.
+    cost = excess.square() * (1.0 - 0.8 * stable)
+    cost *= self.real_episode_length_buf > self.unactuated_time
+    self.ascent_cost_history = torch.roll(self.ascent_cost_history, 1, dims=1)
+    self.ascent_cost_history[:, 0] = cost
     super()._substep_monitor()
     speed = torch.abs(self.dof_vel)
     self.overspeed_peak_by_joint = torch.maximum(self.overspeed_peak_by_joint, speed)
@@ -352,6 +386,8 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
       self.ep_right_foot_force[env_ids] = 0
       self.ep_nonfoot_force[env_ids] = 0
       self.ep_both_foot_support[env_ids] = 0
+      self.support_memory[env_ids] = 0
+      self.ascent_cost_history[env_ids] = 0
 
   def update_force_curriculum(self, env_ids):
     if torch.mean(self.old_headheight[env_ids]) > self.cfg.curriculum.threshold_height:
