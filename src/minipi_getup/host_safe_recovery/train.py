@@ -22,6 +22,7 @@ from minipi_getup.host_safe_recovery.asset import (
 )
 from minipi_getup.host_safe_recovery.config import SafeRecoveryCfg, SafeRecoveryPPOCfg
 from minipi_getup.host_safe_recovery.env import SafeRecoveryEnv
+from minipi_getup.host_safe_recovery.optimization import install_action_std_guard
 
 
 def main() -> None:
@@ -31,10 +32,14 @@ def main() -> None:
   p.add_argument("--seed", type=int, default=1)
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--resume", type=Path)
+  p.add_argument("--min-action-std", type=float, default=0.05)
+  p.add_argument("--max-action-std", type=float, default=1.0)
   p.add_argument("--allow-busy-gpu", action="store_true")
   args = p.parse_args()
   if args.num_envs < 1 or args.max_iterations < 1:
     p.error("--num-envs and --max-iterations must be positive")
+  if not 0.0 < args.min_action_std <= args.max_action_std:
+    p.error("action std bounds must satisfy 0 < minimum <= maximum")
   if not args.allow_busy_gpu and args.device.startswith("cuda"):
     busy = subprocess.check_output(
       ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"], text=True
@@ -64,11 +69,13 @@ def main() -> None:
     "num_envs": args.num_envs,
     "max_iterations": args.max_iterations,
     "resume": str(args.resume) if args.resume else None,
+    "action_std_bounds": [args.min_action_std, args.max_action_std],
     "env_cfg": class_to_dict(cfg),
     "train_cfg": class_to_dict(pcfg),
   }
   (logdir / "config.json").write_text(json.dumps(metadata, indent=2, default=str))
   runner = OnPolicyRunner(env, cfg, class_to_dict(pcfg), str(logdir), device=args.device)
+  install_action_std_guard(runner.alg, args.min_action_std, args.max_action_std)
   if args.resume:
     checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
     info = checkpoint.get("infos") or {}
@@ -88,6 +95,7 @@ def main() -> None:
       variant=EXPERIMENT_NAME,
       asset_sha256=asset_sha256(),
       source_commit=commit,
+      action_std_bounds=[args.min_action_std, args.max_action_std],
       curriculum_state={n: getattr(env, n).detach().cpu() for n in ("force", "action_rescale")},
     )
     old_save(path, infos=payload, it=it)

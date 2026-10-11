@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import torch
 from minipi_getup.host_safe_recovery.env import SafeRecoveryEnv, _quat_mul
+from minipi_getup.host_safe_recovery.optimization import install_action_std_guard
 
 
 class RewardTests(unittest.TestCase):
@@ -62,6 +63,31 @@ class RewardTests(unittest.TestCase):
     a = torch.tensor([[2**-0.5, 2**-0.5, 0.0, 0.0]])
     b = torch.tensor([[2**-0.5, 0.0, 2**-0.5, 0.0]])
     self.assertTrue(torch.allclose(torch.linalg.vector_norm(_quat_mul(a, b), dim=1), torch.ones(1)))
+
+  def test_action_std_guard_clamps_initial_and_post_update_values(self):
+    actor = SimpleNamespace(std=torch.nn.Parameter(torch.tensor([-1.0, 2.0, 0.5])))
+
+    class Algorithm:
+      actor_critic = actor
+
+      def update(self):
+        with torch.no_grad():
+          self.actor_critic.std.copy_(torch.tensor([0.0, 50.0, 0.7]))
+        return "unchanged-result"
+
+    algorithm = Algorithm()
+    install_action_std_guard(algorithm, 0.05, 1.0)
+    self.assertTrue(torch.allclose(actor.std, torch.tensor([0.05, 1.0, 0.5])))
+    self.assertEqual(algorithm.update(), "unchanged-result")
+    self.assertTrue(torch.allclose(actor.std, torch.tensor([0.05, 1.0, 0.7])))
+
+  def test_action_std_guard_rejects_invalid_bounds(self):
+    algorithm = SimpleNamespace(
+      actor_critic=SimpleNamespace(std=torch.nn.Parameter(torch.ones(1))),
+      update=lambda: None,
+    )
+    with self.assertRaises(ValueError):
+      install_action_std_guard(algorithm, 1.0, 0.5)
 
 
 if __name__ == "__main__":
