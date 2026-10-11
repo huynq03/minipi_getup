@@ -153,20 +153,38 @@ class RewardTests(unittest.TestCase):
     self.assertGreater(cost[1], cost[0])
     self.assertTrue(torch.all((cost >= 0) & (cost <= 1)))
 
-  def test_recovery_hip_roll_prefers_moderate_outward_angles_and_fades_in_standing(self):
+  def test_recovery_hip_roll_increases_outward_and_fades_in_standing(self):
     env = self.make_env()
     env.cfg = SafeRecoveryCfg()
     env.device = "cpu"
     env.recovery_hip_roll_indices = torch.tensor([0, 1])
+    env._normalized_supports = lambda: (torch.ones(2), torch.ones(2), torch.zeros(2))
     env.dof_pos[0, :2] = torch.tensor([0.2, -0.2])
     env.dof_pos[1, :2] = torch.tensor([-0.1, 0.1])
     reward = env._reward_recovery_hip_roll()
     self.assertGreater(reward[0], reward[1])
     env.dof_pos[1, :2] = torch.tensor([0.5, -0.5])
-    self.assertGreater(env._reward_recovery_hip_roll()[0], env._reward_recovery_hip_roll()[1])
+    self.assertGreater(env._reward_recovery_hip_roll()[1], env._reward_recovery_hip_roll()[0])
     early = env._reward_recovery_hip_roll()[0]
     env.root_states[0, 2] = 0.4
     self.assertLess(env._reward_recovery_hip_roll()[0], early)
+
+  def test_height_credit_reduces_knee_dominance_but_preserves_floor(self):
+    env = self.make_env()
+    env.cfg = SafeRecoveryCfg()
+    env.root_states[:, 2] = 0.35
+    history = torch.zeros(2, 8, 4, 3)
+    history[:, 1, :, 2] = 20.0
+    env.nonfoot_ground_sensor = SimpleNamespace(data=SimpleNamespace(force_history=history))
+    env.knee_force_indices = torch.tensor([1, 5])
+    env.robot = SimpleNamespace(indexing=SimpleNamespace(body_ids=torch.tensor([0])))
+    env.sim = SimpleNamespace(model=SimpleNamespace(body_mass=torch.ones(2, 1)))
+    env._ground_support_forces = lambda: (torch.tensor([0.0, 100.0]), torch.zeros(2), torch.zeros(2))
+    credit = env._knee_height_credit()
+    self.assertLess(credit[0], credit[1])
+    self.assertTrue(torch.all((credit >= 0.35) & (credit <= 1.0)))
+    history.zero_()
+    self.assertTrue(torch.equal(env._knee_height_credit(), torch.ones(2)))
 
   def test_standing_gate_is_smooth_and_state_dependent(self):
     env = self.make_env()

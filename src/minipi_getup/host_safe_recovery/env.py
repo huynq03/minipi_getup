@@ -338,13 +338,38 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor(
       [1.0, -1.0], device=self.device
     )
-    score = torch.exp(
-      -((outward - cfg.recovery_hip_roll_target_rad)
-        / cfg.recovery_hip_roll_sigma_rad).square()
-    ).mean(dim=1)
+    # Monotonic outward credit with diminishing returns; inward angles receive
+    # negative credit. No narrow target that discourages opening beyond 11 deg.
+    score = torch.tanh(outward / cfg.recovery_hip_roll_scale_rad).mean(dim=1)
+    left, right, _ = self._normalized_supports()
+    useful_support = 0.35 + 0.65 * torch.maximum(left, right)
     # Preparation shaping fades as standing is established, allowing the
     # existing default-posture objective to bring the legs back in.
-    return score * (1.0 - self._standing_gate())
+    return score * useful_support * (1.0 - self._standing_gate())
+
+  def _knee_height_credit(self):
+    left, right, _ = self._ground_support_forces()
+    history = self.nonfoot_ground_sensor.data.force_history
+    knee = history[:, self.knee_force_indices, :, 2].abs().mean(dim=2).sum(dim=1)
+    body_ids = self.robot.indexing.body_ids.long()
+    weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
+    # Ignore incidental contact, and avoid unstable ratios at near-zero load.
+    knee = torch.relu(knee - self.cfg.safe_recovery.contact_force_deadband_weight_fraction * weight)
+    knee_share = knee / (left + right + knee + 0.05 * weight).clamp_min(1.0e-6)
+    elevated = torch.sigmoid(
+      (self.root_states[:, 2] - self.cfg.safe_recovery.knee_support_height_center)
+      / self.cfg.safe_recovery.knee_support_height_width
+    )
+    floor = self.cfg.safe_recovery.knee_height_credit_floor
+    return 1.0 - (1.0 - floor) * elevated * knee_share
+
+  def _reward_head_height(self):
+    # Preserve the original updates of head-height curriculum/monitor buffers.
+    reward = super()._reward_head_height()
+    return reward * self._knee_height_credit().unsqueeze(1)
+
+  def _reward_target_base_height(self):
+    return super()._reward_target_base_height() * self._knee_height_credit()
 
   def _reward_ballistic_ascent(self):
     return self.ascent_cost_history.mean(dim=1)

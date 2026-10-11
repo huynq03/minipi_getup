@@ -60,8 +60,8 @@ class SafeRecoveryCfg(PiCfg):
     knee_support_height_center = 0.18
     knee_support_height_width = 0.04
     knee_lift_velocity_scale_m_s = 0.20
-    recovery_hip_roll_target_rad = 0.20
-    recovery_hip_roll_sigma_rad = 0.15
+    recovery_hip_roll_scale_rad = 0.55
+    knee_height_credit_floor = 0.35
 
   class constraints(PiCfg.constraints):
     class scales(PiCfg.constraints.scales):
