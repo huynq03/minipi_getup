@@ -288,7 +288,8 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
 
   def _reward_joint_overspeed(self):
     excess = torch.relu(torch.abs(self.dof_vel) - self.cfg.safe_recovery.overspeed_soft_rad_s)
-    return torch.mean(excess.square(), dim=1)
+    excess_sq = excess.square()
+    return 0.5 * excess_sq.mean(dim=1) + 0.5 * excess_sq.max(dim=1).values
 
   def _reward_default_posture(self):
     normalized = (self.dof_pos - self.default_dof_pos) / self.pose_sigma

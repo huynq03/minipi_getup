@@ -100,13 +100,25 @@ class RewardTests(unittest.TestCase):
     env.base_ang_vel = torch.zeros(2, 3)
     return env
 
-  def test_overspeed_threshold_and_mean_square(self):
+  def test_overspeed_threshold_and_mean_max_square(self):
     env = self.make_env()
     env.dof_vel[0, 0] = 4.0
     env.dof_vel[1, 0] = -6.0
     cost = env._reward_joint_overspeed()
     self.assertEqual(cost[0], 0)
-    self.assertTrue(torch.allclose(cost[1], torch.tensor(4.0 / 12.0)))
+    expected = 0.5 * (4.0 / 12.0) + 0.5 * 4.0
+    self.assertTrue(torch.allclose(cost[1], torch.tensor(expected)))
+
+  def test_single_joint_spike_is_penalized_per_environment(self):
+    env = self.make_env()
+    env.dof_vel[0, 3] = 10.0
+    env.dof_vel[1, :] = 5.0
+    cost = env._reward_joint_overspeed()
+    old_mean_only_cost = 36.0 / 12.0
+    self.assertGreater(cost[0], old_mean_only_cost * 6.0)
+    self.assertTrue(torch.allclose(cost[1], torch.tensor(1.0)))
+    self.assertEqual(cost.shape, torch.Size([2]))
+    self.assertTrue(torch.isfinite(cost).all())
 
   def test_standing_gate_is_smooth_and_state_dependent(self):
     env = self.make_env()
