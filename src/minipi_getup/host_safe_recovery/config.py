@@ -67,7 +67,9 @@ class SafeRecoveryCfg(PiCfg):
     class scales(PiCfg.constraints.scales):
       # Config scales are multiplied by dt by the unchanged HoST environment.
       regu_joint_overspeed = -0.10
-      target_default_posture = -2.0
+      # Fourfold stronger attraction to the default joints once the existing
+      # smooth standing gate opens; recovery poses remain weakly constrained.
+      target_default_posture = -8.0
       target_stable_standing = -0.05
       # Raw foot scores are bounded: load <= 1.5, supported height <= 1.5,
       # non-foot support <= 1.0. HoST multiplies these scales by dt=0.02.
