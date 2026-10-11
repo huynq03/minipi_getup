@@ -1,8 +1,8 @@
 """Configuration delta for HoST-only safe recovery.
 
-The actor, critics, observations, PPO, action law, curricula, and original rewards are
-inherited unchanged. Only the physical controller and three requested reward objectives
-are added here.
+The actor, critics, observations, PPO, action law, curriculum mechanics, and original
+rewards are inherited unchanged. Only the physical controller, pull-force magnitude,
+and three requested reward objectives are added here.
 """
 
 from minipi_getup.host.config import PiCfg, PiCfgPPO
@@ -13,6 +13,9 @@ class SafeRecoveryCfg(PiCfg):
   class control(PiCfg.control):
     stiffness = dict(REAL_KP)
     damping = dict(REAL_KD)
+
+  class curriculum(PiCfg.curriculum):
+    force = 35
 
   class safe_recovery:
     overspeed_soft_rad_s = 4.0

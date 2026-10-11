@@ -4,11 +4,16 @@ import unittest
 from types import SimpleNamespace
 
 import torch
+from minipi_getup.host_safe_recovery.config import SafeRecoveryCfg
 from minipi_getup.host_safe_recovery.env import SafeRecoveryEnv, _quat_mul
 from minipi_getup.host_safe_recovery.optimization import install_action_std_guard
 
 
 class RewardTests(unittest.TestCase):
+  def test_recovery_pull_force_is_35_newtons(self):
+    self.assertTrue(SafeRecoveryCfg.curriculum.pull_force)
+    self.assertEqual(SafeRecoveryCfg.curriculum.force, 35)
+
   def make_env(self):
     env = object.__new__(SafeRecoveryEnv)
     env.cfg = SimpleNamespace(
