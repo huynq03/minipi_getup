@@ -136,6 +136,23 @@ class RewardTests(unittest.TestCase):
     env.ascent_cost_history = torch.tensor([[0.0, 0.0, 0.0, 0.0], [0.0, 4.0, 0.0, 0.0]])
     self.assertTrue(torch.equal(env._reward_ballistic_ascent(), torch.tensor([0.0, 1.0])))
 
+  def test_knee_cost_filters_other_geoms_and_increases_during_lift(self):
+    env = self.make_env()
+    env.cfg = SafeRecoveryCfg()
+    history = torch.zeros(2, 8, 4, 3)
+    env.nonfoot_ground_sensor = SimpleNamespace(data=SimpleNamespace(force_history=history))
+    env.knee_force_indices = torch.tensor([1, 5])
+    env.robot = SimpleNamespace(indexing=SimpleNamespace(body_ids=torch.tensor([0])))
+    env.sim = SimpleNamespace(model=SimpleNamespace(body_mass=torch.ones(2, 1)))
+    env.root_states[:, 2] = 0.08
+    history[:, 0, :, 2] = 100.0
+    self.assertTrue(torch.equal(env._reward_knee_load_support(), torch.zeros(2)))
+    history[:, 1, :, 2] = 10.0
+    env.root_states[1, 9] = 0.3
+    cost = env._reward_knee_load_support()
+    self.assertGreater(cost[1], cost[0])
+    self.assertTrue(torch.all((cost >= 0) & (cost <= 1)))
+
   def test_standing_gate_is_smooth_and_state_dependent(self):
     env = self.make_env()
     env.root_states[:, 2] = torch.tensor([0.34, 0.15])

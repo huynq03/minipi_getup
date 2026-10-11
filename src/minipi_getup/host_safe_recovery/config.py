@@ -57,6 +57,9 @@ class SafeRecoveryCfg(PiCfg):
     support_rise_time_s = 0.10
     support_decay_time_s = 0.02
     upward_velocity_soft_m_s = 0.35
+    knee_support_height_center = 0.18
+    knee_support_height_width = 0.04
+    knee_lift_velocity_scale_m_s = 0.20
 
   class constraints(PiCfg.constraints):
     class scales(PiCfg.constraints.scales):
@@ -72,6 +75,8 @@ class SafeRecoveryCfg(PiCfg):
       # Style critic weight is 1: strong cost for ballistic ascent, including
       # takeoff after established support (20% residual cost).
       style_ballistic_ascent = -80.0
+      # Additional knee-only load cost; torso support remains unrestricted.
+      style_knee_load_support = -45.0
 
 
 class SafeRecoveryPPOCfg(PiCfgPPO):

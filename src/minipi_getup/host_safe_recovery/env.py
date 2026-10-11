@@ -146,6 +146,13 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     self.nonfoot_force_indices = torch.arange(
       len(nonfoot_names), dtype=torch.long, device=self.device
     )
+    self.knee_force_indices = torch.tensor(
+      [i for i, name in enumerate(nonfoot_names) if name in ("l_calf_collision", "r_calf_collision")],
+      dtype=torch.long,
+      device=self.device,
+    )
+    if len(self.knee_force_indices) != 2:
+      raise RuntimeError(f"unexpected knee contact geoms: {nonfoot_names}")
     if len(self.left_sole_force_indices) != 5 or len(self.right_sole_force_indices) != 5:
       raise RuntimeError(f"unexpected sole contact geoms: {foot_names}")
     if len(self.nonfoot_force_indices) != 8:
@@ -296,6 +303,30 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     score = 0.2 * _foot_support_score(left, right)
     score += 0.8 * _foot_support_score(stable_left, stable_right)
     return height * score
+
+  def _reward_knee_load_support(self):
+    # The calf geom is the local knee housing in the current XML. Filtered
+    # terrain contacts exclude torso contact and all other support geoms.
+    history = self.nonfoot_ground_sensor.data.force_history
+    normal = history[:, self.knee_force_indices, :, 2].abs().mean(dim=2).sum(dim=1)
+    cfg = self.cfg.safe_recovery
+    body_ids = self.robot.indexing.body_ids.long()
+    weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
+    load = _saturating_support(
+      normal, weight, cfg.contact_force_deadband_weight_fraction,
+      cfg.contact_force_scale_weight_fraction,
+    )
+    elevated = torch.sigmoid(
+      (self.root_states[:, 2] - cfg.knee_support_height_center)
+      / cfg.knee_support_height_width
+    )
+    lifting = -torch.expm1(
+      -torch.relu(self.root_states[:, 9]) / cfg.knee_lift_velocity_scale_m_s
+    )
+    # No upright requirement: lifting a tilted torso on knees also incurs cost.
+    # Low, stationary rolling contacts retain only a small smooth penalty.
+    gate = elevated + (1.0 - elevated) * lifting
+    return load * gate
 
   def _reward_ballistic_ascent(self):
     return self.ascent_cost_history.mean(dim=1)
