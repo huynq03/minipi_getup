@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import torch
 from minipi_getup.host_safe_recovery.asset import ASSET_XML, EXPECTED_ASSET_SHA256
 from minipi_getup.host_safe_recovery.config import SafeRecoveryCfg
-from minipi_getup.host_safe_recovery.env import SafeRecoveryEnv, _quat_mul
+from minipi_getup.host_safe_recovery.env import (
+  SafeRecoveryEnv,
+  _foot_support_score,
+  _quat_mul,
+  _saturating_support,
+)
 from minipi_getup.host_safe_recovery.optimization import install_action_std_guard
 
 
@@ -33,9 +38,44 @@ class RewardTests(unittest.TestCase):
       "de53addd1184b579557c84c9511752a894a1e34a6aa3621555af3b092b961fd3",
     )
 
-  def test_recovery_pull_force_is_35_newtons(self):
+  def test_recovery_pull_force_curriculum_is_30_to_0_by_10(self):
     self.assertTrue(SafeRecoveryCfg.curriculum.pull_force)
-    self.assertEqual(SafeRecoveryCfg.curriculum.force, 35)
+    self.assertEqual(SafeRecoveryCfg.curriculum.force, 30)
+    self.assertEqual(SafeRecoveryCfg.safe_recovery.force_curriculum_step_n, 10.0)
+
+  def test_force_support_is_deadbanded_monotonic_and_saturating(self):
+    weight = torch.full((5,), 100.0)
+    force = torch.tensor([0.0, 2.0, 12.0, 27.0, 1000.0])
+    support = _saturating_support(force, weight, 0.02, 0.25)
+    self.assertEqual(support[0], 0)
+    self.assertEqual(support[1], 0)
+    self.assertTrue(torch.all(support[1:] >= support[:-1]))
+    self.assertTrue(torch.all((support >= 0) & (support <= 1)))
+    self.assertGreater(support[3], support[2])
+    self.assertGreater(support[-1], 0.99)
+
+  def test_foot_score_allows_one_foot_and_rewards_two(self):
+    zero = torch.tensor([0.0])
+    partial = torch.tensor([0.7])
+    one_foot = _foot_support_score(partial, zero)
+    two_feet = _foot_support_score(partial, partial)
+    self.assertGreater(one_foot, zero)
+    self.assertGreater(two_feet, one_foot)
+    self.assertEqual(_foot_support_score(torch.ones(1), torch.ones(1)), 1.5)
+
+  def test_force_curriculum_decrements_by_10_and_clamps_at_zero(self):
+    env = object.__new__(SafeRecoveryEnv)
+    env.cfg = SimpleNamespace(
+      curriculum=SimpleNamespace(threshold_height=0.37),
+      safe_recovery=SimpleNamespace(force_curriculum_step_n=10.0),
+    )
+    env.old_headheight = torch.full((4, 1), 0.5)
+    env.force = torch.tensor([30.0, 20.0, 10.0, 0.0])
+    env.action_rescale = torch.ones(4)
+    ids = torch.arange(4)
+    env.update_force_curriculum(ids)
+    self.assertTrue(torch.equal(env.force, torch.tensor([20.0, 10.0, 0.0, 0.0])))
+    self.assertTrue(torch.allclose(env.action_rescale, torch.full((4,), 0.98)))
 
   def make_env(self):
     env = object.__new__(SafeRecoveryEnv)

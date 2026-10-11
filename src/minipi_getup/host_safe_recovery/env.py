@@ -5,11 +5,36 @@ from __future__ import annotations
 import math
 
 import torch
+from mjlab.scene import Scene, SceneCfg
+from mjlab.sensor import ContactMatch, ContactSensor, ContactSensorCfg
+from mjlab.sim import MujocoCfg, SimulationCfg
+from mjlab.sim.sim import Simulation
+from mjlab.terrains import TerrainEntityCfg
 
+import minipi_getup.host.env as host_env
 from minipi_getup.host.env import LeggedRobot_Pi, torch_rand_float
 from minipi_getup.host_safe_recovery.asset import REAL_TORQUE
 
 RESET_CLASSES = ("supine", "prone", "left", "right", "intermediate")
+FEET_CONTACT_SENSOR = "safe_recovery_feet_ground"
+NONFOOT_CONTACT_SENSOR = "safe_recovery_nonfoot_ground"
+
+
+def _saturating_support(
+  force_n: torch.Tensor,
+  weight_n: torch.Tensor,
+  deadband_fraction: float,
+  scale_fraction: float,
+) -> torch.Tensor:
+  """Map ground-normal load to [0, 1) without rewarding impact magnitude."""
+  load = torch.relu(force_n - deadband_fraction * weight_n)
+  scale = (scale_fraction * weight_n).clamp_min(1.0e-6)
+  return -torch.expm1(-load / scale)
+
+
+def _foot_support_score(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+  """Independent single-foot credit plus an explicit two-foot support bonus."""
+  return 0.5 * (left + right) + 0.5 * left * right
 
 
 def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -28,7 +53,63 @@ def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
 
 class SafeRecoveryEnv(LeggedRobot_Pi):
-  """HoST environment with real plant limits, diverse falls, and 3 safety rewards."""
+  """HoST environment with real limits and foot-supported safe recovery rewards."""
+
+  def create_sim(self):
+    """Build the unchanged HoST scene plus ground-filtered contact sensors."""
+    foot_sensor = ContactSensorCfg(
+      name=FEET_CONTACT_SENSOR,
+      primary=ContactMatch(
+        mode="geom", pattern=r"^[rl]_foot[1-5]_collision$", entity="robot"
+      ),
+      secondary=ContactMatch(mode="body", pattern="terrain"),
+      fields=("found", "force"),
+      reduce="netforce",
+      history_length=self.cfg.control.decimation,
+    )
+    nonfoot_sensor = ContactSensorCfg(
+      name=NONFOOT_CONTACT_SENSOR,
+      primary=ContactMatch(
+        mode="geom", pattern=r"^[rl]_(calf|hip)_collision$", entity="robot"
+      ),
+      secondary=ContactMatch(mode="body", pattern="terrain"),
+      fields=("found", "force"),
+      reduce="netforce",
+      history_length=self.cfg.control.decimation,
+    )
+    self.scene = Scene(
+      SceneCfg(
+        num_envs=self.num_envs,
+        env_spacing=self.cfg.env.env_spacing,
+        terrain=TerrainEntityCfg(terrain_type="plane"),
+        entities={"robot": host_env.get_robot_cfg(self.limit_solref)},
+        sensors=(foot_sensor, nonfoot_sensor),
+        extent=2.0,
+      ),
+      device=self.device,
+    )
+    self.sim_cfg = SimulationCfg(
+      njmax=1200,
+      nconmax=300,
+      mujoco=MujocoCfg(
+        timestep=self.cfg.sim.dt / self.physics_substeps,
+        gravity=tuple(self.cfg.sim.gravity),
+      ),
+    )
+    self.sim = Simulation(
+      num_envs=self.num_envs,
+      cfg=self.sim_cfg,
+      spec=self.scene.spec,
+      variant_info=self.scene.collect_variant_info(),
+      device=self.device,
+    )
+    self.scene.initialize(
+      mj_model=self.sim.mj_model, model=self.sim.model, data=self.sim.data
+    )
+    self.robot = self.scene["robot"]
+    self.feet_ground_sensor: ContactSensor = self.scene[FEET_CONTACT_SENSOR]
+    self.nonfoot_ground_sensor: ContactSensor = self.scene[NONFOOT_CONTACT_SENSOR]
+    self._create_envs()
 
   def _create_envs(self):
     super()._create_envs()
@@ -50,6 +131,29 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
       weight.append(self.cfg.safe_recovery.pose_weight[kind])
     self.pose_sigma = torch.tensor(sigma, device=self.device).unsqueeze(0)
     self.pose_weight = torch.tensor(weight, device=self.device).unsqueeze(0)
+    foot_names = self.feet_ground_sensor.primary_names
+    nonfoot_names = self.nonfoot_ground_sensor.primary_names
+    self.left_sole_force_indices = torch.tensor(
+      [i for i, name in enumerate(foot_names) if name.startswith("l_foot")],
+      dtype=torch.long,
+      device=self.device,
+    )
+    self.right_sole_force_indices = torch.tensor(
+      [i for i, name in enumerate(foot_names) if name.startswith("r_foot")],
+      dtype=torch.long,
+      device=self.device,
+    )
+    self.nonfoot_force_indices = torch.arange(
+      len(nonfoot_names), dtype=torch.long, device=self.device
+    )
+    if len(self.left_sole_force_indices) != 5 or len(self.right_sole_force_indices) != 5:
+      raise RuntimeError(f"unexpected sole contact geoms: {foot_names}")
+    if len(self.nonfoot_force_indices) != 4:
+      raise RuntimeError(f"unexpected knee/calf/hip contact geoms: {nonfoot_names}")
+    self.ep_left_foot_force = torch.zeros(self.num_envs, device=self.device)
+    self.ep_right_foot_force = torch.zeros(self.num_envs, device=self.device)
+    self.ep_nonfoot_force = torch.zeros(self.num_envs, device=self.device)
+    self.ep_both_foot_support = torch.zeros(self.num_envs, device=self.device)
 
   def _reset_dofs(self, env_ids):
     """Random valid-ROM fallen joints; velocities begin at rest."""
@@ -117,6 +221,71 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     )
     return height * upright
 
+  def _ground_support_forces(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Mean 5 ms ground-normal loads over the current 20 ms policy step."""
+    foot_history = self.feet_ground_sensor.data.force_history
+    nonfoot_history = self.nonfoot_ground_sensor.data.force_history
+    if foot_history is None or nonfoot_history is None:
+      raise RuntimeError("contact force history is unavailable")
+    # Sensors are filtered to terrain. Absolute world-z is the normal load magnitude;
+    # averaging history rejects one-substep impacts as a source of reward.
+    foot_normal = foot_history[..., 2].abs().mean(dim=2)
+    nonfoot_normal = nonfoot_history[..., 2].abs().mean(dim=2)
+    left = foot_normal[:, self.left_sole_force_indices].sum(dim=1)
+    right = foot_normal[:, self.right_sole_force_indices].sum(dim=1)
+    nonfoot = nonfoot_normal[:, self.nonfoot_force_indices].sum(dim=1)
+    return left, right, nonfoot
+
+  def _normalized_supports(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    left_force, right_force, nonfoot_force = self._ground_support_forces()
+    body_ids = self.robot.indexing.body_ids.long()
+    weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
+    cfg = self.cfg.safe_recovery
+    args = (
+      weight,
+      cfg.contact_force_deadband_weight_fraction,
+      cfg.contact_force_scale_weight_fraction,
+    )
+    return (
+      _saturating_support(left_force, *args),
+      _saturating_support(right_force, *args),
+      _saturating_support(nonfoot_force, *args),
+    )
+
+  def _reward_foot_load_support(self):
+    left_force, right_force, _ = self._ground_support_forces()
+    left, right, _ = self._normalized_supports()
+    self.ep_left_foot_force += left_force
+    self.ep_right_foot_force += right_force
+    self.ep_both_foot_support += (left * right).detach()
+    return _foot_support_score(left, right)
+
+  def _reward_nonfoot_support(self):
+    _, _, nonfoot_force = self._ground_support_forces()
+    _, _, nonfoot = self._normalized_supports()
+    cfg = self.cfg.safe_recovery
+    elevated = torch.sigmoid(
+      (self.root_states[:, 2] - cfg.support_transfer_height_center)
+      / cfg.support_transfer_height_width
+    )
+    upright = torch.sigmoid(
+      ((-self.projected_gravity[:, 2]) - cfg.support_transfer_upright_center)
+      / cfg.support_transfer_upright_width
+    )
+    # Elevation opens the gate; uprightness increases it smoothly. Contact force is
+    # still nearly free in early fallen configurations but costly during weight transfer.
+    transfer_gate = elevated * (0.2 + 0.8 * upright)
+    self.ep_nonfoot_force += nonfoot_force
+    return transfer_gate * nonfoot
+
+  def _reward_foot_supported_height(self):
+    left, right, _ = self._normalized_supports()
+    cfg = self.cfg.safe_recovery
+    height = torch.sigmoid(
+      (self.root_states[:, 2] - cfg.foot_height_center) / cfg.foot_height_width
+    )
+    return height * _foot_support_score(left, right)
+
   def _reward_joint_overspeed(self):
     excess = torch.relu(torch.abs(self.dof_vel) - self.cfg.safe_recovery.overspeed_soft_rad_s)
     return torch.mean(excess.square(), dim=1)
@@ -134,6 +303,8 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     return self._standing_gate() * motion
 
   def _substep_monitor(self):
+    self.feet_ground_sensor.update(self.cfg.sim.dt)
+    self.nonfoot_ground_sensor.update(self.cfg.sim.dt)
     super()._substep_monitor()
     speed = torch.abs(self.dof_vel)
     self.overspeed_peak_by_joint = torch.maximum(self.overspeed_peak_by_joint, speed)
@@ -143,6 +314,19 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
 
   def _log_reset_metrics(self, env_ids):
     super()._log_reset_metrics(env_ids)
+    steps = self.episode_length_buf[env_ids].float().clamp_min(1.0)
+    self.reset_stats["left_foot_normal_force"] = (
+      self.ep_left_foot_force[env_ids] / steps
+    ).mean()
+    self.reset_stats["right_foot_normal_force"] = (
+      self.ep_right_foot_force[env_ids] / steps
+    ).mean()
+    self.reset_stats["nonfoot_normal_force"] = (
+      self.ep_nonfoot_force[env_ids] / steps
+    ).mean()
+    self.reset_stats["both_foot_support"] = (
+      self.ep_both_foot_support[env_ids] / steps
+    ).mean()
     peaks = self.overspeed_peak_by_joint[env_ids].max(0).values
     denom = (
       self.episode_length_buf[env_ids].float().sum()
@@ -159,5 +343,17 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
   def reset_idx(self, env_ids):
     super().reset_idx(env_ids)
     if len(env_ids):
+      self.feet_ground_sensor.reset(env_ids)
+      self.nonfoot_ground_sensor.reset(env_ids)
       self.overspeed_peak_by_joint[env_ids] = 0
       self.overspeed_steps_by_joint[env_ids] = 0
+      self.ep_left_foot_force[env_ids] = 0
+      self.ep_right_foot_force[env_ids] = 0
+      self.ep_nonfoot_force[env_ids] = 0
+      self.ep_both_foot_support[env_ids] = 0
+
+  def update_force_curriculum(self, env_ids):
+    if torch.mean(self.old_headheight[env_ids]) > self.cfg.curriculum.threshold_height:
+      step = self.cfg.safe_recovery.force_curriculum_step_n
+      self.force[env_ids] = (self.force[env_ids] - step).clamp_min(0.0)
+      self.action_rescale[env_ids] = (self.action_rescale[env_ids] - 0.02).clamp_min(0.25)

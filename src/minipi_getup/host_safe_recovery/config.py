@@ -1,8 +1,8 @@
 """Configuration delta for HoST-only safe recovery.
 
-The actor, critics, observations, PPO, action law, curriculum mechanics, and original
-rewards are inherited unchanged. Only the physical controller, pull-force magnitude,
-and three requested reward objectives are added here.
+The actor, critics, observations, PPO, action law, and original rewards are inherited
+unchanged. This delta adds the physical controller, a 30-to-0 N pull curriculum, the
+three safety objectives, and foot-supported recovery shaping.
 """
 
 from minipi_getup.host.config import PiCfg, PiCfgPPO
@@ -15,7 +15,7 @@ class SafeRecoveryCfg(PiCfg):
     damping = dict(REAL_KD)
 
   class curriculum(PiCfg.curriculum):
-    force = 35
+    force = 30
 
   class safe_recovery:
     overspeed_soft_rad_s = 4.0
@@ -43,6 +43,17 @@ class SafeRecoveryCfg(PiCfg):
     }
     stable_joint_velocity_weight = 1.0
     stable_base_angular_velocity_weight = 0.25
+    force_curriculum_step_n = 10.0
+
+    # Contact-force shaping is normalized by each randomized robot's weight.
+    contact_force_deadband_weight_fraction = 0.02
+    contact_force_scale_weight_fraction = 0.25
+    support_transfer_height_center = 0.20
+    support_transfer_height_width = 0.05
+    support_transfer_upright_center = 0.35
+    support_transfer_upright_width = 0.15
+    foot_height_center = 0.18
+    foot_height_width = 0.06
 
   class constraints(PiCfg.constraints):
     class scales(PiCfg.constraints.scales):
@@ -50,6 +61,11 @@ class SafeRecoveryCfg(PiCfg):
       regu_joint_overspeed = -0.10
       target_default_posture = -2.0
       target_stable_standing = -0.05
+      # Raw foot scores are bounded: load <= 1.5, supported height <= 1.5,
+      # non-foot support <= 1.0. HoST multiplies these scales by dt=0.02.
+      target_foot_load_support = 8.0
+      style_nonfoot_support = -15.0
+      target_foot_supported_height = 8.0
 
 
 class SafeRecoveryPPOCfg(PiCfgPPO):
