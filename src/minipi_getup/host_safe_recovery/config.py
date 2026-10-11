@@ -60,6 +60,8 @@ class SafeRecoveryCfg(PiCfg):
     knee_support_height_center = 0.18
     knee_support_height_width = 0.04
     knee_lift_velocity_scale_m_s = 0.20
+    recovery_hip_roll_target_rad = 0.20
+    recovery_hip_roll_sigma_rad = 0.15
 
   class constraints(PiCfg.constraints):
     class scales(PiCfg.constraints.scales):
@@ -77,6 +79,7 @@ class SafeRecoveryCfg(PiCfg):
       style_ballistic_ascent = -80.0
       # Additional knee-only load cost; torso support remains unrestricted.
       style_knee_load_support = -45.0
+      target_recovery_hip_roll = 6.0
 
 
 class SafeRecoveryPPOCfg(PiCfgPPO):

@@ -131,6 +131,10 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
       weight.append(self.cfg.safe_recovery.pose_weight[kind])
     self.pose_sigma = torch.tensor(sigma, device=self.device).unsqueeze(0)
     self.pose_weight = torch.tensor(weight, device=self.device).unsqueeze(0)
+    self.recovery_hip_roll_indices = torch.tensor(
+      [self.dof_names.index("l_hip_roll_joint"), self.dof_names.index("r_hip_roll_joint")],
+      device=self.device, dtype=torch.long,
+    )
     foot_names = self.feet_ground_sensor.primary_names
     nonfoot_names = self.nonfoot_ground_sensor.primary_names
     self.left_sole_force_indices = torch.tensor(
@@ -327,6 +331,20 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     # Low, stationary rolling contacts retain only a small smooth penalty.
     gate = elevated + (1.0 - elevated) * lifting
     return load * gate
+
+  def _reward_recovery_hip_roll(self):
+    cfg = self.cfg.safe_recovery
+    # Positive left / negative right roll abducts both legs in this robot.
+    outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor(
+      [1.0, -1.0], device=self.device
+    )
+    score = torch.exp(
+      -((outward - cfg.recovery_hip_roll_target_rad)
+        / cfg.recovery_hip_roll_sigma_rad).square()
+    ).mean(dim=1)
+    # Preparation shaping fades as standing is established, allowing the
+    # existing default-posture objective to bring the legs back in.
+    return score * (1.0 - self._standing_gate())
 
   def _reward_ballistic_ascent(self):
     return self.ascent_cost_history.mean(dim=1)

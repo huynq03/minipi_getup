@@ -153,6 +153,21 @@ class RewardTests(unittest.TestCase):
     self.assertGreater(cost[1], cost[0])
     self.assertTrue(torch.all((cost >= 0) & (cost <= 1)))
 
+  def test_recovery_hip_roll_prefers_moderate_outward_angles_and_fades_in_standing(self):
+    env = self.make_env()
+    env.cfg = SafeRecoveryCfg()
+    env.device = "cpu"
+    env.recovery_hip_roll_indices = torch.tensor([0, 1])
+    env.dof_pos[0, :2] = torch.tensor([0.2, -0.2])
+    env.dof_pos[1, :2] = torch.tensor([-0.1, 0.1])
+    reward = env._reward_recovery_hip_roll()
+    self.assertGreater(reward[0], reward[1])
+    env.dof_pos[1, :2] = torch.tensor([0.5, -0.5])
+    self.assertGreater(env._reward_recovery_hip_roll()[0], env._reward_recovery_hip_roll()[1])
+    early = env._reward_recovery_hip_roll()[0]
+    env.root_states[0, 2] = 0.4
+    self.assertLess(env._reward_recovery_hip_roll()[0], early)
+
   def test_standing_gate_is_smooth_and_state_dependent(self):
     env = self.make_env()
     env.root_states[:, 2] = torch.tensor([0.34, 0.15])
