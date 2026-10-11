@@ -35,7 +35,7 @@ class RewardTests(unittest.TestCase):
       )
     self.assertEqual(
       EXPECTED_ASSET_SHA256,
-      "de53addd1184b579557c84c9511752a894a1e34a6aa3621555af3b092b961fd3",
+      "a0a961cbd522d7836b48b4e77160128df0c3f640f01de19617b43657800eb533",
     )
 
   def test_recovery_pull_force_curriculum_is_30_to_0_by_10(self):
