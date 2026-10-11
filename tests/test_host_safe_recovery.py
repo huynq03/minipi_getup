@@ -16,6 +16,9 @@ class RewardTests(unittest.TestCase):
     root = ET.parse(ASSET_XML).getroot()
     geoms = {geom.get("name"): geom for geom in root.findall(".//geom") if geom.get("name")}
     for side in ("l", "r"):
+      thigh = geoms[f"{side}_thigh_collision"]
+      self.assertEqual(thigh.get("type"), "box")
+      self.assertEqual(thigh.get("size"), "0.0005 0.0005 0.0005")
       calf = geoms[f"{side}_calf_collision"]
       self.assertEqual(calf.get("type"), "box")
       self.assertEqual(calf.get("size"), "0.029 0.0325 0.0275")
@@ -27,7 +30,7 @@ class RewardTests(unittest.TestCase):
       )
     self.assertEqual(
       EXPECTED_ASSET_SHA256,
-      "e1332fed10f54f2b6c9391129ec96e94208f95f9d31925f4cc75d63e6c159dca",
+      "de53addd1184b579557c84c9511752a894a1e34a6aa3621555af3b092b961fd3",
     )
 
   def test_recovery_pull_force_is_35_newtons(self):

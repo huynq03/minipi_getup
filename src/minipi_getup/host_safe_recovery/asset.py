@@ -13,7 +13,7 @@ ASSET_XML = Path(
   "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
   "hightorque_minipi/xmls/cl_pai_host_torso_host_legs.xml"
 )
-EXPECTED_ASSET_SHA256 = "e1332fed10f54f2b6c9391129ec96e94208f95f9d31925f4cc75d63e6c159dca"
+EXPECTED_ASSET_SHA256 = "de53addd1184b579557c84c9511752a894a1e34a6aa3621555af3b092b961fd3"
 
 REAL_KP = {
   "hip_pitch": 60.0,
