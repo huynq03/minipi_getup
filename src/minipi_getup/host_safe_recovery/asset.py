@@ -11,9 +11,9 @@ import minipi_getup.host.env as host_env
 
 ASSET_XML = Path(
   "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
-  "hightorque_minipi/xmls/cl_pai_host_torso.xml"
+  "hightorque_minipi/xmls/cl_pai_host_torso_host_legs.xml"
 )
-EXPECTED_ASSET_SHA256 = "cda43fb547589de89adbd740e01e416308265a4ca96661e085699f20193415e9"
+EXPECTED_ASSET_SHA256 = "e1332fed10f54f2b6c9391129ec96e94208f95f9d31925f4cc75d63e6c159dca"
 
 REAL_KP = {
   "hip_pitch": 60.0,

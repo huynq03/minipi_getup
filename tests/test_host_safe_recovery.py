@@ -1,15 +1,35 @@
 """Lightweight tests for the isolated HoST safe-recovery reward delta."""
 
 import unittest
+import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 import torch
+from minipi_getup.host_safe_recovery.asset import ASSET_XML, EXPECTED_ASSET_SHA256
 from minipi_getup.host_safe_recovery.config import SafeRecoveryCfg
 from minipi_getup.host_safe_recovery.env import SafeRecoveryEnv, _quat_mul
 from minipi_getup.host_safe_recovery.optimization import install_action_std_guard
 
 
 class RewardTests(unittest.TestCase):
+  def test_host_like_leg_collisions(self):
+    root = ET.parse(ASSET_XML).getroot()
+    geoms = {geom.get("name"): geom for geom in root.findall(".//geom") if geom.get("name")}
+    for side in ("l", "r"):
+      calf = geoms[f"{side}_calf_collision"]
+      self.assertEqual(calf.get("type"), "box")
+      self.assertEqual(calf.get("size"), "0.029 0.0325 0.0275")
+      self.assertEqual(
+        geoms[f"{side}_ankle_pitch_collision"].get("size"), "0.039 0.04 0.025"
+      )
+      self.assertEqual(
+        geoms[f"{side}_ankle_roll_collision"].get("size"), "0.029 0.025 0.025"
+      )
+    self.assertEqual(
+      EXPECTED_ASSET_SHA256,
+      "e1332fed10f54f2b6c9391129ec96e94208f95f9d31925f4cc75d63e6c159dca",
+    )
+
   def test_recovery_pull_force_is_35_newtons(self):
     self.assertTrue(SafeRecoveryCfg.curriculum.pull_force)
     self.assertEqual(SafeRecoveryCfg.curriculum.force, 35)
