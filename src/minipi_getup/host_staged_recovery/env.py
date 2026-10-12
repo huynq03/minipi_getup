@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import torch
+from mjlab.sensor import ContactMatch, ContactSensor, ContactSensorCfg
 
 from minipi_getup.host.env import torch_rand_float
 from minipi_getup.host_safe_recovery.env import (
@@ -14,6 +15,13 @@ from minipi_getup.host_safe_recovery.env import (
 )
 from minipi_getup.host_staged_recovery import geometry as geo
 
+LEG_CONTACT_SENSOR = "staged_leg_leg_contact"
+
+
+def weight_of(env) -> torch.Tensor:
+  body_ids = env.robot.indexing.body_ids.long()
+  return env.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(env.cfg.sim.gravity[2])
+
 
 class StagedRecoveryEnv(SafeRecoveryEnv):
   """Legs in -> feet down -> COM over support -> rise -> default posture.
@@ -22,8 +30,20 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
   once per policy step in `_update_stage_state`, before any reward term reads it.
   """
 
+  def _extra_sensors(self) -> tuple:
+    # Net force between the whole left and right leg subtrees (shells included).
+    return (ContactSensorCfg(
+      name=LEG_CONTACT_SENSOR,
+      primary=ContactMatch(mode="subtree", pattern="l_hip_pitch_link", entity="robot"),
+      secondary=ContactMatch(mode="subtree", pattern="r_hip_pitch_link", entity="robot"),
+      fields=("found", "force"),
+      reduce="netforce",
+      history_length=self.cfg.control.decimation,
+    ),)
+
   def _init_buffers(self):
     super()._init_buffers()
+    self.leg_contact_sensor: ContactSensor = self.scene[LEG_CONTACT_SENSOR]
     n, dev = self.num_envs, self.device
     names = list(self.robot.body_names)
     self.hip_body_indices = torch.tensor(
@@ -44,6 +64,10 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.sole_centres = zeros(2, 3)
     self.stance_width = zeros()
     self.foot_gap = zeros()
+    self.leg_contact_force = zeros()
+    self.leg_contact = zeros()
+    self.ep_leg_contact_time = zeros()
+    self.ep_min_foot_share = zeros()
     self.prev_height = zeros()
     self.foot_flat = zeros(2)
     self.knee_support = zeros()
@@ -88,12 +112,18 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     )
     delta = self.sole_centres[:, 0, :2] - self.sole_centres[:, 1, :2]
     self.stance_width[:] = torch.linalg.vector_norm(delta, dim=-1)
-    self.foot_gap[:] = geo.foot_lateral_gap(corners, foot_quat)
+    self.foot_gap[:] = geo.foot_lateral_gap(corners, geo.lateral_axis(self.root_states[:, 3:7], foot_quat))
     self.foot_flat[:] = 1.0 - _sole_tilt_cost(foot_quat, self.cfg.safe_recovery.sole_tilt_sigma_rad)
     self.lift_gate[:] = torch.sigmoid(
       (self.root_states[:, 2] - cfg.lift_gate_height_center) / cfg.lift_gate_height_width
     )
 
+    legs = self.leg_contact_sensor.data.force_history  # (N, 1, H, 3)
+    self.leg_contact_force[:] = torch.linalg.vector_norm(legs, dim=-1).mean(dim=-1).sum(dim=1)
+    self.leg_contact[:] = _saturating_support(
+      self.leg_contact_force, weight_of(self), cfg.leg_contact_deadband_weight_fraction,
+      cfg.leg_contact_scale_weight_fraction,
+    )
     history = self.nonfoot_ground_sensor.data.force_history
     knee = history[:, self.knee_force_indices, :, 2].abs().mean(dim=2).sum(dim=1)
     body_ids = self.robot.indexing.body_ids.long()
@@ -130,7 +160,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.prev_height.copy_(h)
     standing = self._standing_gate() > 0.5
     self.ep_knee_time += (self.knee_support > cfg.knee_contact_support_min).float() * self.dt * actuated
+    self.ep_leg_contact_time += (self.leg_contact > 0.1).float() * self.dt * actuated
     self.ep_standing_steps += standing.float()
+    force_l, force_r, _ = self._ground_support_forces()
+    share = torch.minimum(force_l, force_r) / (force_l + force_r).clamp_min(1.0)
+    self.ep_min_foot_share += share * standing
     calf = self.dof_pos[:, self.knee_contact_indices]
     self.ep_reverse_standing += (standing & (calf < -cfg.knee_reverse_soft_rad).any(1)).float()
     err_mask = actuated & (self.lift_gate > 0.5) & torch.isfinite(self.com_outside)
@@ -186,6 +220,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       cfg.knee_reverse_soft_rad, cfg.knee_reverse_span_rad,
     )
 
+  def _reward_leg_contact(self):
+    # Legs pressing on each other (feet stacked, knees/shins/thighs touching).
+    actuated = (self.real_episode_length_buf > self.unactuated_time).float()
+    return self.leg_contact * self.lift_gate * actuated
+
   def _reward_standing_load_imbalance(self):
     left, right, _ = self._ground_support_forces()
     body_ids = self.robot.indexing.body_ids.long()
@@ -228,6 +267,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     return (0.5 * excess.mean(dim=1) + 0.5 * excess.max(dim=1).values) * self._recovery_regu_multiplier()
 
   def _substep_monitor(self):
+    # Contact sensors here are stepped manually, like host_safe_recovery's own.
+    self.leg_contact_sensor.update(self.cfg.sim.dt)
     super()._substep_monitor()
     self.step_peak_qd = torch.maximum(self.step_peak_qd, self.dof_vel.abs())
     actuated = self.real_episode_length_buf > self.unactuated_time
@@ -274,8 +315,12 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["stage_t_com"] = mean_t(t_com)
     s["stage_t_rise"] = mean_t(t_rise)
     s["knee_contact_time_s"] = self.ep_knee_time[env_ids].mean()
+    s["leg_contact_time_s"] = self.ep_leg_contact_time[env_ids].mean()
     s["reverse_knee_standing_frac"] = (
       self.ep_reverse_standing[env_ids] / self.ep_standing_steps[env_ids].clamp_min(1.0)
+    ).mean()
+    s["standing_min_foot_share"] = (
+      self.ep_min_foot_share[env_ids] / self.ep_standing_steps[env_ids].clamp_min(1.0)
     ).mean()
     s["com_support_error_m"] = (
       self.ep_com_err[env_ids].sum() / self.ep_com_err_steps[env_ids].sum().clamp_min(1.0)
@@ -296,6 +341,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
         buf[env_ids] = -1.0
       self.rise_supported[env_ids] = False
       self.prev_height[env_ids] = 0.0
-      for buf in (self.ep_knee_time, self.ep_reverse_standing, self.ep_standing_steps,
+      self.leg_contact_sensor.reset(env_ids)
+      for buf in (self.ep_knee_time, self.ep_leg_contact_time, self.ep_min_foot_share, self.ep_reverse_standing, self.ep_standing_steps,
                   self.ep_com_err, self.ep_com_err_steps, self.actuated_peak_vel):
         buf[env_ids] = 0.0

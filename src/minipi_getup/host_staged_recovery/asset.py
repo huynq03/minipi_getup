@@ -1,8 +1,10 @@
-"""Staged-recovery asset: CL_PAI/HoST hybrid with 120-degree outward hip roll.
+"""Staged-recovery asset: CL_PAI/HoST hybrid, 120-degree hip roll, leg shells.
 
-Same file as host_safe_recovery's asset except the hip-roll outward limit
-(pi/2 -> 2pi/3); hip pitch stays -1.25..1.75 rad. Kept as a separate file so the
-baseline XML and its checkpoints keep their hash.
+Baseline XML with the hip-roll outward limit widened (pi/2 -> 2pi/3; hip pitch
+stays -1.25..1.75 rad) plus massless box shells fitted to the thigh, shin and foot
+mesh AABBs. The shells use bits l=2/4, r=4/2, so they collide only left-vs-right:
+no terrain, torso, or same-leg contact. Without them the baseline collision model
+let the two feet overlap by up to ~2 cm and the shins/thighs pass through each other.
 """
 
 from __future__ import annotations
@@ -15,9 +17,9 @@ from minipi_getup.host_safe_recovery import asset as safe_asset
 
 ASSET_XML = Path(
   "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
-  "hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120.xml"
+  "hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_legcoll.xml"
 )
-EXPECTED_ASSET_SHA256 = "45c5882bd0597d161be3a81277c9663ab6c3c5183b56854d9dd919275854f71b"
+EXPECTED_ASSET_SHA256 = "eba62848d93dd88a50ee9ac43191b08baa8a67b483cef1be017f411da776f0c8"
 
 
 def asset_sha256() -> str:

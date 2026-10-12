@@ -110,6 +110,7 @@ def rollout(args) -> dict:
     t_stand, t_feet, t_com, t_rise = (torch.full((n,), float("nan"), device=dev) for _ in range(4))
     hold = torch.zeros(hold_steps, n, dtype=torch.bool, device=dev)
     knee_time = torch.zeros(n, device=dev)
+    leg_time = torch.full((n,), float("nan") if not hasattr(env, "leg_contact") else 0.0, device=dev)
     com_err_rise, com_err_rise_n = torch.zeros(n, device=dev), torch.zeros(n, device=dev)
     final = {k: torch.zeros(n, device=dev) for k in ("pose_rms", "calf_min", "width", "gap", "com_err", "tilt_deg", "qd_rms")}
     rise_ok = torch.zeros(n, dtype=torch.bool, device=dev)
@@ -146,7 +147,7 @@ def rollout(args) -> dict:
       sustained = torch.minimum(load, memory).min(1).values
       cen = corners.mean(2)
       width = torch.linalg.vector_norm(cen[:, 0, :2] - cen[:, 1, :2], dim=-1)
-      gap = geo.foot_lateral_gap(corners, fquat)
+      gap = geo.foot_lateral_gap(corners, geo.lateral_axis(env.root_states[:, 3:7], fquat))
       feet = sustained > STAGE.stage_feet_support
       supported = feet & geo.adequate_stance(gap, width, STAGE.stance_min_gap_m, STAGE.stance_max_width_m) & (
         outside <= STAGE.stage_com_supported_m)
@@ -166,6 +167,8 @@ def rollout(args) -> dict:
       knee = history[:, env.knee_force_indices, :, 2].abs().mean(dim=2).sum(dim=1)
       knee_sup = _saturating_support(knee, weight, sr.contact_force_deadband_weight_fraction, sr.contact_force_scale_weight_fraction)
       knee_time += (active & actuated & (knee_sup > STAGE.knee_contact_support_min)).float() * env.dt
+      if hasattr(env, "leg_contact"):  # staged only: needs the leg-leg sensor
+        leg_time += (active & actuated & (env.leg_contact > 0.1)).float() * env.dt
       tilt = torch.stack([geo_tilt(q) for q in fquat.unbind(1)], 1).max(1).values
       vals = {
         "pose_rms": torch.sqrt(((env.dof_pos - env.default_dof_pos) ** 2).mean(1)),
@@ -189,7 +192,7 @@ def rollout(args) -> dict:
       "class": cls, "success": success, "stood": stood, "t_stand": t_stand,
       "t_feet": t_feet, "t_com": t_com, "t_rise": t_rise,
       "peak_qd": sub["qd"].max(1).values, "peak_qd_joint": sub["qd"], "peak_tau_joint": sub["tau"],
-      "knee_time": knee_time, "com_err_rise": com_err_rise / com_err_rise_n.clamp_min(1),
+      "knee_time": knee_time, "leg_time": leg_time, "com_err_rise": com_err_rise / com_err_rise_n.clamp_min(1),
       "rise_ok": rise_ok, "rise_width": rise_width, "rise_com": rise_com,
       **{f"final_{k}": v for k, v in final.items()},
     })
@@ -223,6 +226,7 @@ def rollout(args) -> dict:
       "final_reverse_knee_frac": float((cat["final_calf_min"][m & cat["success"]] < -STAGE.knee_reverse_soft_rad).float().mean()),
       "final_max_sole_tilt_deg": _stats(cat["final_tilt_deg"][m & cat["success"]]),
       "knee_contact_time_s": _stats(cat["knee_time"][m]),
+      "leg_leg_contact_time_s": _stats(cat["leg_time"][m]),
       "stage_feet_before_rise": float(order("t_feet", "t_rise")) if ok.any() else None,
       "stage_com_before_rise": float(order("t_com", "t_rise")) if ok.any() else None,
       "stage_t_feet_s": _stats(cat["t_feet"][ok]),

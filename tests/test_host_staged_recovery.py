@@ -61,14 +61,24 @@ class GeometryTests(unittest.TestCase):
     self.assertAlmostEqual(out.item(), 0.02, places=3)
 
   def test_lateral_gap_detects_touching_and_toe_in_feet(self):
+    base = IDENTITY[None]
     apart, q = two_feet(0.08, -0.08)
     touching, q2 = two_feet(0.029, -0.029)
     toe_in, q3 = two_feet(0.05, -0.05, yaw_left=-0.6, yaw_right=0.6)
-    self.assertAlmostEqual(geo.foot_lateral_gap(apart, q).item(), 0.16 - 0.058, places=3)
-    self.assertLess(geo.foot_lateral_gap(touching, q2).item(), 1e-3)
+    gap = lambda c, fq: geo.foot_lateral_gap(c, geo.lateral_axis(base, fq)).item()  # noqa: E731
+    self.assertAlmostEqual(gap(apart, q), 0.16 - 0.058, places=3)
+    self.assertLess(gap(touching, q2), 1e-3)
     width = torch.linalg.vector_norm(toe_in.mean(2)[:, 0, :2] - toe_in.mean(2)[:, 1, :2], dim=-1)
     self.assertGreater(width.item(), 0.09)  # centre distance alone looks acceptable
-    self.assertLess(geo.foot_lateral_gap(toe_in, q3).item(), 0.04)
+    self.assertLess(gap(toe_in, q3), 0.04)
+
+  def test_lateral_axis_follows_torso_even_with_opposite_foot_yaw(self):
+    _, q = two_feet(0.08, -0.08, yaw_left=1.57, yaw_right=-1.57)  # headings cancel
+    axis = geo.lateral_axis(yaw_quat(0.3)[None], q)
+    self.assertTrue(torch.allclose(axis, torch.tensor([[-math.sin(0.3), math.cos(0.3)]]), atol=1e-5))
+    rolled = torch.tensor([[math.cos(0.75), math.sin(0.75), 0.0, 0.0]])  # torso rolled 1.5 rad
+    _, q2 = two_feet(0.08, -0.08)
+    self.assertTrue(torch.allclose(geo.lateral_axis(rolled, q2), torch.tensor([[0.0, 1.0]]), atol=1e-5))
 
   def test_stance_cost_band(self):
     gap = torch.tensor([0.10, 0.0, 0.10, 0.10])
@@ -112,9 +122,11 @@ class GeometryTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-  def test_asset_is_pinned_hip120(self):
+  def test_asset_is_pinned_hip120_with_left_right_shells(self):
     self.assertEqual(asset_sha256(), EXPECTED_ASSET_SHA256)
     text = ASSET_XML.read_text()
+    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="2" conaffinity="4"'), 3)
+    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="2"'), 3)
     self.assertEqual(text.count('range="-1.25 1.75"'), 2)
     self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 2.0943951023931953"', text)
 
@@ -126,7 +138,7 @@ class ConfigTests(unittest.TestCase):
       self.assertEqual(getattr(s, name), 0.0, name)
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_knee_reverse_lock",
-                 "style_joint_overspeed", "style_standing_load_imbalance"):
+                 "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)

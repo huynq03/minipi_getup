@@ -27,8 +27,9 @@ no term targets a fixed knee or hip angle.
 - `com_score = exp(−(d_out/0.03)²) · (0.7 + 0.3·exp(−(d_c/0.06)²))`, or 0 without support.
 - **Stance**:
   - `width` is the horizontal distance between the sole centres (0.16 m at zero joints).
-  - `gap` is the lateral clearance between the two footprints, measured across the mean foot heading
-    (0.10 m at zero joints; ≤ 0 means touching or crossing).
+  - `gap` is the lateral clearance between the two footprints, measured along the torso's horizontal
+    left axis (falling back to the mean foot heading when the torso is rolled past ~73°). It is 0.10 m
+    at zero joints; ≤ 0 means touching or crossing.
 - **Gates**:
   - `lift = σ((z_base − 0.14)/0.03)`: torso off the floor.
   - `standing gate = σ((z_base − 0.25)/0.045)·σ((−g_z − 0.65)/0.12)`, the same as `host_safe_recovery`.
@@ -42,6 +43,16 @@ load, so an unloaded foot escaped all of them. Revision 2:
 - regates `style_stance_width` on `max(sup)·lift`;
 - regates `style_knee_reverse_lock` on `max(sup, standing gate)`;
 - adds `style_standing_load_imbalance`.
+
+Replaying those standing poses on the real meshes showed the two feet interpenetrating (median 5 mm,
+up to 21 mm). The baseline collision model is smaller than the meshes: feet ±2.5–3.1 cm vs a ±3.6 cm
+mesh, and the shin and thigh have no collision at all. Revision 2 therefore also:
+
+- moves to `cl_pai_host_torso_host_legs_hip120_legcoll.xml`, which adds massless box shells on the
+  mesh AABBs of the thigh, shin and foot. They use bits l=2/4 and r=4/2, so they collide left-vs-right
+  only (no terrain, torso or same-leg contact). Mass and inertia are unchanged;
+- adds `style_leg_contact` from a left-subtree vs right-subtree contact sensor;
+- measures `gap` across the torso's lateral axis instead of the mean foot heading.
 
 ## Removed relative to `host_safe_recovery`
 
@@ -66,6 +77,7 @@ load, so an unloaded foot escaped all of them. Revision 2:
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
 | 5 standing | `style_knee_reverse_lock` | −8 | mean over legs of `max(sup, standing gate) · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | leg loaded (any phase), or any leg while standing |
+| 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
 | velocity | `style_joint_overspeed` | −1.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 4)²` × regu ramp (1/3 → 1) | after the success curriculum |
@@ -96,10 +108,10 @@ Calf sign (verified by kinematics): calf > 0 flexes the knee (hip–ankle distan
   linearly from the 16/6 Nm limit at 4.5 rad/s to 0 at 6 rad/s. Braking torque is unaffected.
   - This roughly halves peak joint speed. It is **not** a hard cap: impacts and coupled motion can still
     exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
-- **Asset:** `cl_pai_host_torso_host_legs_hip120.xml` (SHA256 `45c5882b…`).
+- **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `eba62848…`).
   - It is the baseline XML with hip roll widened outward to 2π/3; hip pitch stays −1.25…1.75 rad.
-  - Thigh collision is a 1 mm box, as in the baseline, so thigh–torso and thigh–thigh interference is
-    not modelled.
+  - It adds the left/right leg shells described in revision 2.
+  - Thigh–torso interference is still not modelled: the thigh's own collision remains a 1 mm box.
 - **Reset:** the same distribution as the baseline. Joints are uniform within absolute half-spans equal
   to 25% of the baseline ROM, so the widened hip roll does not widen resets. Five classes: supine,
   prone, left, right, intermediate.

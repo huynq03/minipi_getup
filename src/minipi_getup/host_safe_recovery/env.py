@@ -124,6 +124,10 @@ def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 class SafeRecoveryEnv(LeggedRobot_Pi):
   """HoST environment with real limits and foot-supported safe recovery rewards."""
 
+  def _extra_sensors(self) -> tuple:
+    """Hook for variants that need more contact sensors."""
+    return ()
+
   def create_sim(self):
     """Build the unchanged HoST scene plus ground-filtered contact sensors."""
     foot_sensor = ContactSensorCfg(
@@ -158,7 +162,7 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
           secondary=ContactMatch(mode="body", pattern="terrain"),
           fields=("found", "force", "pos", "normal", "tangent"),
           reduce="maxforce", global_frame=True,
-        )),
+        ), *self._extra_sensors()),
         extent=2.0,
       ),
       device=self.device,

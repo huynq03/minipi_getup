@@ -83,19 +83,33 @@ def com_support_score(outside, centre, any_valid, sigma_out, sigma_centre):
   return torch.where(any_valid, score, torch.zeros_like(score))
 
 
-def foot_lateral_gap(corners: torch.Tensor, foot_quat: torch.Tensor) -> torch.Tensor:
-  """Clearance between the two sole footprints across the mean foot heading.
+def lateral_axis(base_quat: torch.Tensor, foot_quat: torch.Tensor) -> torch.Tensor:
+  """Horizontal unit vector pointing to the robot's left.
+
+  The torso's y axis projected on the ground; when the torso is rolled so far
+  that this projection is short (< 0.3), fall back to the left of the summed foot
+  headings. Feet yawed in opposite directions do not destabilize it while upright.
+  """
+  n = base_quat.shape[0]
+  y_axis = torch.zeros(n, 3, device=base_quat.device, dtype=base_quat.dtype)
+  y_axis[:, 1] = 1.0
+  base_left = quat_apply(base_quat, y_axis)[:, :2]
+  x_axis = torch.zeros(n * 2, 3, device=base_quat.device, dtype=base_quat.dtype)
+  x_axis[:, 0] = 1.0
+  heading = quat_apply(foot_quat.reshape(-1, 4), x_axis).reshape(n, 2, 3)[..., :2].sum(1)
+  foot_left = torch.stack((-heading[:, 1], heading[:, 0]), dim=-1)
+  use_base = torch.linalg.vector_norm(base_left, dim=-1, keepdim=True) > 0.3
+  axis = torch.where(use_base, base_left, foot_left)
+  return axis / torch.linalg.vector_norm(axis, dim=-1, keepdim=True).clamp_min(1e-6)
+
+
+def foot_lateral_gap(corners: torch.Tensor, lateral: torch.Tensor) -> torch.Tensor:
+  """Clearance between the two sole footprints along `lateral` (robot left).
 
   corners (N, 2, 4, 3) with index 0 = left foot. Positive when the left sole lies
   entirely left of the right sole; <= 0 when the soles touch, overlap or cross.
   Zero joints give about 0.10 m.
   """
-  x_axis = torch.zeros(foot_quat.shape[:-1] + (3,), device=foot_quat.device, dtype=foot_quat.dtype)
-  x_axis[..., 0] = 1.0
-  heading = quat_apply(foot_quat.reshape(-1, 4), x_axis.reshape(-1, 3)).reshape(x_axis.shape)
-  heading = heading[..., :2].sum(1)
-  heading = heading / torch.linalg.vector_norm(heading, dim=-1, keepdim=True).clamp_min(1e-6)
-  lateral = torch.stack((-heading[:, 1], heading[:, 0]), dim=-1)  # left of heading
   side = (corners[..., :2] * lateral[:, None, None]).sum(-1)  # (N, 2, 4)
   return side[:, 0].amin(-1) - side[:, 1].amax(-1)
 
