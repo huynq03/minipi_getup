@@ -43,6 +43,7 @@ no term targets a fixed knee or hip angle.
 | `style_loaded_hip_roll_excess` | −12 | joint-specific; the hip ROM was widened on purpose |
 | `style_loaded_knee_hyperextension` | −4 | replaced by `style_knee_reverse_lock` (also active while standing) |
 | `regu_joint_overspeed` | −0.30 | moved to `style_joint_overspeed` |
+| `style_hip_roll_deviation` (HoST) | −10 | HoST limit of 1.4 rad (one leg) / 0.9 rad (both) would cap the widened hip-roll ROM |
 
 ## Pipeline terms (new or modified)
 
@@ -74,8 +75,8 @@ Calf sign (verified by kinematics): calf > 0 flexes the knee (hip–ankle distan
   - `loaded_sole_slip` (−6, linear above 0.03 m/s).
   - `nonfoot_support` (−15), `ballistic_ascent` (−80), `recovery_rotation` (−2).
   - HoST `ground_parallel`, `feet_distance` (> 0.45 m), `foot_displacement`, and
-    `hip_roll_deviation` / `hip_yaw_deviation` / `knee_deviation`. These are the HoST originals:
-    thresholds of 1.4 rad on one leg or 0.9 rad on both.
+    `hip_yaw_deviation` / `knee_deviation`. These are the HoST originals (`hip_roll_deviation` is
+    removed, see above).
 - **regu:** all HoST regularizers, including `dof_pos_limits` (soft limit 0.9 of the XML range).
 
 ## Actuation, assets and curricula

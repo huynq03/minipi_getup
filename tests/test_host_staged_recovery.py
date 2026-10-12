@@ -113,7 +113,8 @@ class ConfigTests(unittest.TestCase):
   def test_no_joint_strategy_rewards_and_pipeline_terms_registered(self):
     s = StagedRecoveryCfg.constraints.scales
     for name in ("target_loaded_knee_flexion", "target_knee_sole_progress", "target_recovery_hip_roll",
-                 "style_loaded_hip_roll_excess", "style_loaded_knee_hyperextension", "regu_joint_overspeed"):
+                 "style_loaded_hip_roll_excess", "style_loaded_knee_hyperextension", "regu_joint_overspeed",
+                 "style_hip_roll_deviation"):
       self.assertEqual(getattr(s, name), 0.0, name)
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_knee_reverse_lock",

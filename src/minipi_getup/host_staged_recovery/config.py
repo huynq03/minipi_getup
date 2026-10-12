@@ -73,6 +73,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       target_recovery_hip_roll = 0.0
       style_loaded_hip_roll_excess = 0.0
       style_loaded_knee_hyperextension = 0.0
+      # HoST's hip-roll deviation limit (1.4 rad one leg / 0.9 both) would cap the
+      # widened 120-degree ROM; dropped by request.
+      style_hip_roll_deviation = 0.0
       # Pipeline terms (raw scales, multiplied by dt = 0.02 in HoST).
       target_feet_under_com = 3.0
       target_two_foot_flat_support = 4.0
