@@ -222,6 +222,7 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(StagedRecoveryCfg.staged.motor_max_speed_rad_s, 4.0)
     self.assertEqual(StagedRecoveryCfg.staged.improper_rise_height_m, 0.18)
     self.assertEqual(StagedRecoveryCfg.staged.feet_first_height_m, 0.16)
+    self.assertEqual(StagedRecoveryCfg.staged.orientation_feet_credit_floor, 1.0)  # A disabled (rev 10)
     self.assertEqual(StagedRecoveryCfg.staged.torso_lift_height_m, 0.14)
     for fn in ("_reward_orientation", "_reward_target_orientation", "_reward_ground_parallel"):
       self.assertIn(fn, StagedRecoveryEnv.__dict__)  # feet-gated overrides

@@ -273,3 +273,13 @@ switched on because the two-foot success EMA stayed 0.
 - C: base above 0.18 m only (no torso-angle trigger).
 - Flat-feet definition, one-foot rise (−20), rise speed (−15) and the curriculum-scaled termination stay.
 
+## Revision 10: feet-gated orientation (A) removed
+
+rev 9 never stood in 316 iterations, even with the pull force (rev 8: 0.84, rev 6: 0.98 at the same
+point). Sitting or kneeling upright below 0.16 m earned the full task orientation reward (~43 per
+episode, as much as standing in rev 6), and rising above 0.16 m without two flat feet cut it to 10%, so
+every way up lost reward. A is disabled (`orientation_feet_credit_floor = 1.0`); the orientation reward is
+as in rev 6. Feet first is enforced by B (base lift above 0.14 m without two flat feet) and C (improper-rise
+termination above 0.18 m with the curriculum), which charge *how* the robot rises without making rising
+itself unprofitable.
+

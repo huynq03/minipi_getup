@@ -84,7 +84,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # feet_first_height_m, torso-orientation rewards (task orientation, target
     # orientation, ground parallel) keep orientation_feet_credit_floor until both
     # flat feet carry the load. Sitting or kneeling upright is paid in full.
-    orientation_feet_credit_floor = 0.1
+    # Revision 10: disabled (floor 1.0). Gating the largest reward made standing
+    # up lose reward, so rev 9 never stood; B and C enforce feet first instead.
+    orientation_feet_credit_floor = 1.0
     feet_first_height_m = 0.16
     feet_first_height_width_m = 0.02
     # Base lift without two flat feet, above torso_lift_height_m (sitting up,
