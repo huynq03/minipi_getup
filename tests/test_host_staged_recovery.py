@@ -138,7 +138,7 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="10"'), 3)
     self.assertEqual(text.count('name="base_shell_collision" class="collision" type="box" contype="8" conaffinity="6"'), 1)
     self.assertEqual(text.count('range="-1.25 1.75"'), 2)
-    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-2.0 1.65"'), 2)
+    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-2.5 1.65"'), 2)
     self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 2.0943951023931953"', text)
 
   def test_no_joint_strategy_rewards_and_pipeline_terms_registered(self):
