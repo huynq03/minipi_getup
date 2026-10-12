@@ -73,11 +73,11 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | Stage | Term | Scale | Value per step | Active when |
 |---|---|---:|---|---|
 | 1 legs in | `target_feet_under_com` | +3 | mean over feet of `exp(−(relu(‖foot_xy − COM_xy‖ − 0.12)/0.08)²)` | always (also satisfied when standing) |
-| 2 feet down | `target_two_foot_flat_support` | +4 | `sup_L·flat_L · sup_R·flat_R`, with `flat = exp(−(tilt/0.15)²)` | always |
+| 2 feet down | `target_two_foot_flat_support` | +4 | `share₂ · max(sup_L, sup_R) · flat_L · flat_R`, with `share₂ = clip(min(F_L,F_R)/(F_L+F_R) / 0.3)` and `flat = exp(−(tilt/0.15)²)` | always; one-foot standing (4% share) earns ~0.13 |
 | 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · max(sup_L, sup_R) · lift` | either foot loaded, torso up; a foot resting on or crossing the other also pays |
-| 3 COM transfer | `target_com_support` | +6 | `com_score · max(sup_L, sup_R) · lift` | a foot loaded, torso up |
-| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
-| 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
+| 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · lift` | both feet loaded, torso up |
+| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.15 + 0.85·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.15 keeps an early gradient |
+| 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − ready) · lift` | after actuation starts |
 | 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 31.6 at the −2.5 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
@@ -176,3 +176,17 @@ Logged per episode:
 
 `evaluate.py` computes the same events for any checkpoint, including the `host_safe_recovery` baseline,
 with no pull force, DR or observation noise and a fixed action scale.
+
+## Revision 4: strict pipeline order (feet under COM → both feet down → rise)
+
+The revision-3 run (`20261012_173122`, 600 iterations) still stood on one foot: the weaker foot carried
+4% of the load, the legs leaned on each other for 6 s per episode, and the two-foot success EMA stayed at
+0, so the penalty curriculum and velocity termination never started. Cause: every rising credit used
+`com_score`, which is satisfied by the hull of a single loaded foot, and the two-foot reward used
+saturating supports that are already near 1 at a few percent of the weight.
+
+- `ready = feet_under_com · share₂ · min(flat_L, flat_R) · com_score` (product: every step is needed).
+- Height credit `0.15 + 0.85·ready` (floor 0.4 → 0.15); unsupported ascent uses `1 − ready`.
+- `target_com_support` and `target_two_foot_flat_support` use the load share `share₂`.
+- Monitor `stage_ready_before_stand`: fraction of stood episodes with `ready > 0.5` before first standing.
+

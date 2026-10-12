@@ -73,6 +73,9 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.knee_support = zeros()
     self.knee_time = zeros()
     self.lift_gate = zeros()
+    self.ready = zeros()
+    self.two_foot = zeros()
+    self.ep_ready_before_rise = torch.zeros(n, dtype=torch.bool, device=dev)
     # Episode monitors.
     self.t_feet = torch.full((n,), -1.0, device=dev)
     self.t_com = torch.full((n,), -1.0, device=dev)
@@ -138,6 +141,14 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     decay = math.exp(-self.dt / cfg.knee_contact_decay_s)
     self.knee_time[:] = torch.where(on_knee, self.knee_time + self.dt, self.knee_time * decay)
 
+    force_l, force_r, _ = self._ground_support_forces()
+    self.two_foot[:] = geo.two_foot_share_score(force_l, force_r, cfg.two_foot_full_share)
+    self.ready[:] = geo.rise_ready_score(
+      self._reward_feet_under_com(),
+      self.two_foot,
+      self.foot_flat.min(dim=1).values,
+      self.com_score,
+    )
     self._update_stage_monitors(load)
 
   def _update_stage_monitors(self, load):
@@ -159,6 +170,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     ) & (-self.projected_gravity[:, 2] > cfg.stage_rise_upright)
     self.t_rise[:] = torch.where(crossing, t, self.t_rise)
     self.rise_supported[:] = torch.where(crossing, supported, self.rise_supported)
+    self.ep_ready_before_rise |= actuated & ~self.ever_stood & (self.ready > 0.5)
     self.prev_height.copy_(h)
     standing = self._standing_gate() > 0.5
     self.ep_knee_time += (self.knee_support > cfg.knee_contact_support_min).float() * self.dt * actuated
@@ -208,12 +220,15 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     )
 
   def _reward_two_foot_flat_support(self):
+    # Load-share based: a weaker foot touching with a few percent of the weight
+    # earns almost nothing (one-foot standing), an even split earns 1.
     left, right, _ = self._normalized_supports()
-    return left * self.foot_flat[:, 0] * right * self.foot_flat[:, 1]
+    loaded = torch.maximum(left, right)
+    return self.two_foot * loaded * self.foot_flat[:, 0] * self.foot_flat[:, 1]
 
   def _reward_com_support(self):
-    left, right, _ = self._normalized_supports()
-    return self.com_score * torch.maximum(left, right) * self.lift_gate
+    # COM over the support of both feet: one-foot balance does not count.
+    return self.com_score * self.two_foot * self.lift_gate
 
   def _reward_stance_width(self):
     cfg = self.cfg.staged
@@ -229,7 +244,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     cfg = self.cfg.staged
     actuated = (self.real_episode_length_buf > self.unactuated_time).float()
     return geo.unsupported_ascent_cost(
-      self.com_vz, self.com_score, self.lift_gate * actuated,
+      self.com_vz, self.ready, self.lift_gate * actuated,
       cfg.unsupported_ascent_threshold_m_s, cfg.unsupported_ascent_scale_m_s,
     )
 
@@ -264,11 +279,12 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
   def _com_height_credit(self):
     floor = self.cfg.staged.height_credit_com_floor
-    return floor + (1.0 - floor) * self.com_score
+    return floor + (1.0 - floor) * self.ready
 
   def _knee_height_credit(self):
-    # Used by head height (task) and target base height: rising credit needs
-    # feet-supported COM, keeping a floor so early exploration still gets signal.
+    # Used by head height (task) and target base height: rising credit needs the
+    # pipeline state (feet under COM, both feet down, COM supported), keeping a
+    # small floor so early exploration still gets signal.
     return super()._knee_height_credit() * self._com_height_credit()
 
   def _reward_foot_supported_height(self):
@@ -334,6 +350,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["stage_feet_before_rise"] = frac((t_feet >= 0) & ((t_rise < 0) | (t_feet <= t_rise)))
     s["stage_com_before_rise"] = frac((t_com >= 0) & ((t_rise < 0) | (t_com <= t_rise)))
     s["stage_supported_at_rise"] = frac(self.rise_supported[env_ids])
+    s["stage_ready_before_stand"] = frac(self.ep_ready_before_rise[env_ids])
     s["stage_t_feet"] = mean_t(t_feet)
     s["stage_t_com"] = mean_t(t_com)
     s["stage_t_rise"] = mean_t(t_rise)
@@ -365,6 +382,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       for buf in (self.t_feet, self.t_com, self.t_rise):
         buf[env_ids] = -1.0
       self.rise_supported[env_ids] = False
+      self.ep_ready_before_rise[env_ids] = False
       self.prev_height[env_ids] = 0.0
       self.leg_contact_sensor.reset(env_ids)
       for buf in (self.ep_knee_time, self.ep_leg_contact_time, self.ep_min_foot_share, self.ep_knee_extended_standing,

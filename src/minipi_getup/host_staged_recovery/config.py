@@ -50,8 +50,11 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # Leg-on-leg contact: 0.5% W deadband, saturating with a 5% W scale (~3.4 N).
     leg_contact_deadband_weight_fraction = 0.005
     leg_contact_scale_weight_fraction = 0.05
-    # Height credit keeps this fraction when the COM is not over the support.
-    height_credit_com_floor = 0.4
+    # Rising credit keeps this fraction until the robot is "ready": feet under
+    # the COM, both feet flat on the ground (weaker foot >= two_foot_full_share
+    # of the load) and the COM over the support polygon.
+    height_credit_com_floor = 0.15
+    two_foot_full_share = 0.3
     unsupported_ascent_threshold_m_s = 0.05
     unsupported_ascent_scale_m_s = 0.20
     # Reverse knee: calf < 0 bends the knee backwards toward the -0.65 stop.

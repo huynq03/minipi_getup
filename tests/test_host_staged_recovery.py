@@ -114,6 +114,21 @@ class GeometryTests(unittest.TestCase):
     self.assertGreater(cost[1].item(), 0.6)  # (60 / 74.8)^2
     self.assertEqual(cost[2].item(), 0.0)
 
+  def test_two_foot_share_and_ready_need_every_pipeline_step(self):
+    left = torch.tensor([34.0, 64.0, 0.0, 20.0])
+    right = torch.tensor([34.0, 4.0, 0.0, 48.0])
+    share = geo.two_foot_share_score(left, right, 0.3)
+    self.assertEqual(share[0].item(), 1.0)
+    self.assertAlmostEqual(share[1].item(), (4 / 68) / 0.3, places=4)  # one-foot standing ~0.2
+    self.assertEqual(share[2].item(), 0.0)
+    self.assertAlmostEqual(share[3].item(), (20 / 68) / 0.3, places=4)
+    ones = torch.ones(4)
+    ready = geo.rise_ready_score(ones, share, ones, torch.tensor([1.0, 1.0, 1.0, 0.0]))
+    self.assertEqual(ready[0].item(), 1.0)
+    self.assertLess(ready[1].item(), 0.25)
+    self.assertEqual(ready[2].item(), 0.0)
+    self.assertEqual(ready[3].item(), 0.0)  # COM outside the support
+
   def test_speed_limit_fades_accelerating_torque_only(self):
     torque = torch.tensor([16.0, 16.0, 16.0, -16.0])
     vel = torch.tensor([2.0, 5.25, 7.0, 7.0])

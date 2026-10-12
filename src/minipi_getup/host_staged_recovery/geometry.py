@@ -146,6 +146,19 @@ def knee_extension_cost(calf, weight, soft_rad, span_rad):
   return ((torch.relu(-calf - soft_rad) / span_rad).square() * weight).mean(-1)
 
 
+def two_foot_share_score(left_n, right_n, full_share, eps=1.0):
+  """min(L, R) / (L + R), scaled so a weaker-foot share >= full_share scores 1.
+  ~0 when standing on one foot or with no load."""
+  share = torch.minimum(left_n, right_n) / (left_n + right_n).clamp_min(eps)
+  return (share / full_share).clamp(0.0, 1.0)
+
+
+def rise_ready_score(feet_under_com, two_foot, flat_min, com_score):
+  """Pipeline readiness: feet tucked under the COM, both feet down and flat
+  sharing the load, COM over the support. Product, so every step is needed."""
+  return feet_under_com * two_foot * flat_min * com_score
+
+
 def load_imbalance_cost(left_n, right_n, weight_n, floor_fraction):
   """((L - R) / (L + R + floor*W))^2: ~1 on one foot, 0 for an even split."""
   return ((left_n - right_n) / (left_n + right_n + floor_fraction * weight_n)).square()
