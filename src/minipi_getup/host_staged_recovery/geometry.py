@@ -128,6 +128,11 @@ def knee_reverse_lock_cost(calf, support, soft_rad, span_rad):
   return ((torch.relu(-calf - soft_rad) / span_rad).square() * support).mean(-1)
 
 
+def load_imbalance_cost(left_n, right_n, weight_n, floor_fraction):
+  """((L - R) / (L + R + floor*W))^2: ~1 on one foot, 0 for an even split."""
+  return ((left_n - right_n) / (left_n + right_n + floor_fraction * weight_n)).square()
+
+
 def knee_contact_ramp(knee_time, ramp_s, initial):
   """Brief knee support costs `initial`; sustained support ramps to full cost."""
   return initial + (1.0 - initial) * (knee_time / ramp_s).clamp(0.0, 1.0)

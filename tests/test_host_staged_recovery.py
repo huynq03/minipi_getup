@@ -96,6 +96,14 @@ class GeometryTests(unittest.TestCase):
     ramp = geo.knee_contact_ramp(torch.tensor([0.0, 0.4, 2.0]), 0.8, 0.25)
     self.assertTrue(torch.allclose(ramp, torch.tensor([0.25, 0.625, 1.0])))
 
+  def test_load_imbalance_penalizes_one_foot_standing(self):
+    left = torch.tensor([34.0, 64.0, 0.0])
+    right = torch.tensor([34.0, 4.0, 0.0])
+    cost = geo.load_imbalance_cost(left, right, torch.tensor(68.0), 0.1)
+    self.assertEqual(cost[0].item(), 0.0)
+    self.assertGreater(cost[1].item(), 0.6)  # (60 / 74.8)^2
+    self.assertEqual(cost[2].item(), 0.0)
+
   def test_speed_limit_fades_accelerating_torque_only(self):
     torque = torch.tensor([16.0, 16.0, 16.0, -16.0])
     vel = torch.tensor([2.0, 5.25, 7.0, 7.0])
@@ -118,7 +126,7 @@ class ConfigTests(unittest.TestCase):
       self.assertEqual(getattr(s, name), 0.0, name)
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_knee_reverse_lock",
-                 "style_joint_overspeed"):
+                 "style_joint_overspeed", "style_standing_load_imbalance"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)

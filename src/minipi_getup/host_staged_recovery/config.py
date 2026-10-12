@@ -45,6 +45,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     stance_gap_scale_m = 0.03
     stance_width_scale_m = 0.08
     stance_cost_cap = 4.0
+    # Standing load split; the floor keeps the ratio finite while unloaded.
+    load_imbalance_floor_weight_fraction = 0.1
     # Height credit keeps this fraction when the COM is not over the support.
     height_credit_com_floor = 0.4
     unsupported_ascent_threshold_m_s = 0.05
@@ -83,6 +85,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
       style_knee_reverse_lock = -8.0
+      # Standing on one foot (the other resting on it) escaped every per-foot
+      # load-weighted cost; this makes the load split itself costly.
+      style_standing_load_imbalance = -6.0
       # Overspeed cost (excess over 4 rad/s, on the substep peak), moved from the
       # regu group (group weight 0.1) to style (1.0) and raised for |qd| < 6 rad/s.
       regu_joint_overspeed = 0.0

@@ -165,7 +165,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.foot_gap, self.stance_width, cfg.stance_min_gap_m, cfg.stance_max_width_m,
       cfg.stance_gap_scale_m, cfg.stance_width_scale_m, cfg.stance_cost_cap,
     )
-    return cost * torch.minimum(left, right)
+    # Gate on either foot: one foot resting on or crossing the other also pays.
+    return cost * torch.maximum(left, right) * self.lift_gate
 
   def _reward_unsupported_ascent(self):
     cfg = self.cfg.staged
@@ -178,10 +179,19 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
   def _reward_knee_reverse_lock(self):
     cfg = self.cfg.staged
     left, right, _ = self._normalized_supports()
+    # Loaded leg, or any leg while standing (an unloaded standing leg may not lock).
+    weight = torch.maximum(torch.stack((left, right), dim=1), self._standing_gate()[:, None])
     return geo.knee_reverse_lock_cost(
-      self.dof_pos[:, self.knee_contact_indices], torch.stack((left, right), dim=1),
+      self.dof_pos[:, self.knee_contact_indices], weight,
       cfg.knee_reverse_soft_rad, cfg.knee_reverse_span_rad,
     )
+
+  def _reward_standing_load_imbalance(self):
+    left, right, _ = self._ground_support_forces()
+    body_ids = self.robot.indexing.body_ids.long()
+    weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
+    cost = geo.load_imbalance_cost(left, right, weight, self.cfg.staged.load_imbalance_floor_weight_fraction)
+    return cost * self._standing_gate()
 
   def _reward_knee_load_support(self):
     cfg = self.cfg.staged

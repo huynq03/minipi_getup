@@ -33,6 +33,16 @@ no term targets a fixed knee or hip angle.
   - `lift = σ((z_base − 0.14)/0.03)`: torso off the floor.
   - `standing gate = σ((z_base − 0.25)/0.045)·σ((−g_z − 0.65)/0.12)`, the same as `host_safe_recovery`.
 
+## Revision 2 (after run `20261012_145629`)
+
+At iteration 700, the first run stood on one foot: 94% of the load on the right foot, with the left foot
+1.3 cm above the ground and resting on the right one. Every per-foot cost was weighted by that foot's own
+load, so an unloaded foot escaped all of them. Revision 2:
+
+- regates `style_stance_width` on `max(sup)·lift`;
+- regates `style_knee_reverse_lock` on `max(sup, standing gate)`;
+- adds `style_standing_load_imbalance`.
+
 ## Removed relative to `host_safe_recovery`
 
 | Term | Was | Reason |
@@ -51,11 +61,12 @@ no term targets a fixed knee or hip angle.
 |---|---|---:|---|---|
 | 1 legs in | `target_feet_under_com` | +3 | mean over feet of `exp(−(relu(‖foot_xy − COM_xy‖ − 0.12)/0.08)²)` | always (also satisfied when standing) |
 | 2 feet down | `target_two_foot_flat_support` | +4 | `sup_L·flat_L · sup_R·flat_R`, with `flat = exp(−(tilt/0.15)²)` | always |
-| 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · min(sup_L, sup_R)` | both feet loaded |
+| 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · max(sup_L, sup_R) · lift` | either foot loaded, torso up; a foot resting on or crossing the other also pays |
 | 3 COM transfer | `target_com_support` | +6 | `com_score · max(sup_L, sup_R) · lift` | a foot loaded, torso up |
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
-| 5 standing | `style_knee_reverse_lock` | −8 | mean over legs of `sup · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | leg loaded (any phase) |
+| 5 standing | `style_knee_reverse_lock` | −8 | mean over legs of `max(sup, standing gate) · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | leg loaded (any phase), or any leg while standing |
+| 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
 | velocity | `style_joint_overspeed` | −1.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 4)²` × regu ramp (1/3 → 1) | after the success curriculum |
 
