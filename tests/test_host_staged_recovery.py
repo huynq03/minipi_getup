@@ -134,11 +134,15 @@ class ConfigTests(unittest.TestCase):
   def test_asset_is_pinned_hip120_with_left_right_shells(self):
     self.assertEqual(asset_sha256(), EXPECTED_ASSET_SHA256)
     text = ASSET_XML.read_text()
-    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="2" conaffinity="12"'), 3)
-    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="10"'), 3)
+    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="2" conaffinity="12"'), 2)
+    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="10"'), 2)
+    self.assertIn('l_foot_shell_collision" class="collision" type="box" contype="66" conaffinity="12"', text)
+    self.assertIn('r_foot_shell_collision" class="collision" type="box" contype="132" conaffinity="10"', text)
+    self.assertIn('l_hip_shell_collision" class="collision" type="box" contype="16" conaffinity="64"', text)
+    self.assertIn('r_hip_shell_collision" class="collision" type="box" contype="32" conaffinity="128"', text)
     self.assertEqual(text.count('name="base_shell_collision" class="collision" type="box" contype="8" conaffinity="6"'), 1)
     self.assertEqual(text.count('range="-1.25 1.75"'), 2)
-    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-2.5 1.65"'), 2)
+    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-2.95 1.65"'), 2)
     self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 2.0943951023931953"', text)
 
   def test_no_joint_strategy_rewards_and_pipeline_terms_registered(self):

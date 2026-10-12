@@ -78,7 +78,7 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 3 COM transfer | `target_com_support` | +6 | `com_score · max(sup_L, sup_R) · lift` | a foot loaded, torso up |
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
-| 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 33.1 at the −2.5 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
+| 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 46.4 at the −2.95 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
@@ -86,19 +86,22 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 
 **Knee geometry** (angle between the hip→knee and knee→ankle joint axes):
 
-| calf (rad) | +1.65 | +1.00 | 0 (default) | −0.30 | −0.65 | −1.00 | −2.00 | −2.50 |
+| calf (rad) | +1.65 | +1.00 | 0 (default) | −0.30 | −0.65 | −1.00 | −2.00 | −2.95 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| knee flexion | 132° | 95° | 37° | 20° | **0° (straight)** | −20° | −77° | −106° (reversed limit) |
+| knee flexion | 132° | 95° | 37° | 20° | **0° (straight)** | −20° | −77° | −132° (reversed limit) |
 
 The baseline/HoST limit of −0.65 is exactly the straight leg, so earlier "reverse knee" notes in this
-project meant a straight knee locked on its stop. This asset widens the limit to −2.5 (106° backwards), so reversed
-knees are possible in simulation.
+project meant a straight knee locked on its stop. This asset widens the limit to −2.95, so the knee bends backwards as far as it flexes forwards
+(132°).
 
-- With feet planted flat and the torso upright, −2.5 needs hip and ankle pitch of about +1.25 rad
-  (limits 1.75 and 1.3).
-- The foot and ankle stay 14 mm clear of the thigh, hip and torso, and the shin 13 mm clear of the hip.
-- Past about −2.6 the foot would pass through its own thigh and hip, and no collision stops that
-  (same-leg shells and adjacent links do not collide). −2.5 is the last geometrically clean limit.
+- Both directions are stopped by the hip-roll motor block at the top of the short (15 cm) thigh.
+  Flexing forwards, only the slim shin reaches it, at about the +1.65 limit. Bending backwards, the
+  foot (offset 7.5 cm forward of the ankle axis, ~17 cm long) swings into it from about −2.6 with the
+  ankle neutral.
+- Hip-motor shells (foot-vs-own-hip only) stop the foot physically. The full −2.95 is collision-free
+  when the ankle is tucked (+1.3), just as a deep forward squat needs the foot to rotate away.
+- With feet planted flat and the torso upright, the angle is symmetric: equal knee angles give equal
+  torso heights in either direction.
 
 **Hardware caveat:** in MuJoCo nothing blocks the reversed range, because adjacent bodies do not
 collide and the convex hulls overlap at the knee anyway. Confirm that the real knee is not
@@ -128,11 +131,13 @@ mechanically stopped at the straight position before deploying a policy that use
   - This roughly halves peak joint speed. It is **not** a hard cap: impacts and coupled motion can still
     exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
 - **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `acb67647…`).
-  - It is the baseline XML with hip roll widened outward to 2π/3 and the knee range widened to −2.5…1.65
+  - It is the baseline XML with hip roll widened outward to 2π/3 and the knee range widened to −2.95…1.65
     (reversible past straight); hip pitch stays −1.25…1.75 rad.
-  - It adds the leg shells described in revision 2 plus a torso shell that copies the torso box.
-    Bits: left 2/12, right 4/10, torso 8/6, so the shells collide left-vs-right and leg-vs-torso
-    only.
+  - It adds the leg shells described in revision 2, a torso shell that copies the torso box, and
+    hip-motor shells.
+  - Bits: left 2/12 (left foot 66/12), right 4/10 (right foot 132/10), torso 8/6, left hip 16/64,
+    right hip 32/128.
+  - So the shells collide left-vs-right, leg-vs-torso and foot-vs-own-hip only.
   - A 1872-pose ROM sweep found no false contact at zero joints or fully adducted legs. The thigh shell
     never reaches the torso inside the ROM; feet and shins reach it only with the knee folded past
     ~0.8 rad and the hip flexed.
