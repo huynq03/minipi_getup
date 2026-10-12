@@ -182,7 +182,11 @@ def rollout(args) -> dict:
       for k, v in vals.items():
         final[k] = torch.where(active, v, final[k])
       if args.save_traj and len(traj) < env.max_episode_length:
-        traj.append(torch.cat((env.root_states[:, :7], env.dof_pos), 1)[: args.save_traj].cpu())
+        # Hold the last pre-reset frame once an env's episode has ended.
+        frame = torch.cat((env.root_states[:, :7], env.dof_pos), 1)[: args.save_traj].cpu()
+        if traj:
+          frame = torch.where(active[: args.save_traj, None].cpu(), frame, traj[-1])
+        traj.append(frame)
       alive = active
       if not alive.any():
         break
