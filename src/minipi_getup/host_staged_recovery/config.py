@@ -12,11 +12,14 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
   class safe_recovery(SafeRecoveryCfg.safe_recovery):
     # Hardware velocity requirement: |qd| < 6 rad/s.
     evaluation_ceiling_rad_s = 6.0
+    # Overspeed cost starts here (was 4): slow, deliberate motion.
+    overspeed_soft_rad_s = 3.0
 
   class staged:
     # Motor torque-speed limit (accelerating torque fades to 0 at the max speed).
-    motor_max_speed_rad_s = 6.0
-    motor_speed_band_rad_s = 1.5
+    # 4 rad/s (was 6): leaves a 2 rad/s margin below the 6 rad/s hardware limit.
+    motor_max_speed_rad_s = 4.0
+    motor_speed_band_rad_s = 1.0
     # Absolute reset half-spans = 25% of the baseline ROM spans, so the reset
     # distribution does not widen with the 120-degree hip-roll limit.
     reset_half_span = {
@@ -55,6 +58,13 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # of the load) and the COM over the support polygon.
     height_credit_com_floor = 0.05
     two_foot_full_share = 0.3
+    # Ready also needs the COM centred between the feet (distance to the centroid
+    # of the loaded sole corners).
+    ready_com_centre_sigma_m = 0.03
+    # Slow rise: upward COM speed above this costs (a 1.5 s rise is ~0.17 m/s).
+    rise_speed_threshold_m_s = 0.20
+    rise_speed_scale_m_s = 0.10
+    rise_speed_cost_cap = 9.0
     # One-foot rise penalty: active from this base height until standing.
     rise_gate_height_center = 0.10
     rise_gate_height_width = 0.02
@@ -67,10 +77,10 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     knee_extension_soft_rad = 0.25
     knee_straight_rad = -0.65
     # Actuated |qd| termination (5 ms peak): off until the success curriculum
-    # starts (EMA 0.60), then 20 -> 6 rad/s as it completes (EMA 0.85).
+    # starts (EMA 0.60), then 12 -> 5 rad/s as it completes (EMA 0.85).
     velocity_termination = True  # training only; evaluation/playback disable it
-    velocity_termination_start_rad_s = 20.0
-    velocity_termination_final_rad_s = 6.0
+    velocity_termination_start_rad_s = 12.0
+    velocity_termination_final_rad_s = 5.0
     knee_extension_span_rad = 0.40
     # Knee support: brief use is cheap, sustained use costs the full penalty.
     knee_contact_support_min = 0.10
@@ -103,7 +113,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
       # Getting up must use both feet: any rising step with the load on one foot pays.
-      style_one_foot_rise = -12.0
+      style_one_foot_rise = -20.0
+      # Get up slowly: upward COM speed above 0.2 m/s.
+      style_rise_speed = -4.0
       # Standing-gated only: straight or reversed knees are free while getting
       # up but must return toward the flexed default once standing.
       style_standing_knee_extension = -16.0
@@ -115,7 +127,7 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       # Overspeed cost (excess over 4 rad/s, on the substep peak), moved from the
       # regu group (group weight 0.1) to style (1.0) and raised for |qd| < 6 rad/s.
       regu_joint_overspeed = 0.0
-      style_joint_overspeed = -1.0
+      style_joint_overspeed = -2.0
 
 
 class StagedRecoveryPPOCfg(SafeRecoveryPPOCfg):

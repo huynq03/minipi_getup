@@ -76,14 +76,15 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 2 feet down | `target_two_foot_flat_support` | +4 | `share₂ · max(sup_L, sup_R) · flat_L · flat_R`, with `share₂ = clip(min(F_L,F_R)/(F_L+F_R) / 0.3)` and `flat = exp(−(tilt/0.15)²)` | always; one-foot standing (4% share) earns ~0.13 |
 | 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · max(sup_L, sup_R) · lift` | either foot loaded, torso up; a foot resting on or crossing the other also pays |
 | 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · lift` | both feet loaded, torso up |
-| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.05 + 0.95·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.05 keeps an early gradient |
-| 4 rise | `style_one_foot_rise` | −12 | `max(sup_L, sup_R) · (1 − share₂) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
+| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.05 + 0.95·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score · exp(−(d_centre/0.03)²)` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.05 keeps an early gradient |
+| 4 rise | `style_one_foot_rise` | −20 | `max(sup_L, sup_R) · (1 − share₂) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − ready) · lift` | after actuation starts |
 | 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 31.6 at the −2.5 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
-| velocity | `style_joint_overspeed` | −1.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 4)²` × regu ramp (1/3 → 1) | after the success curriculum |
+| 4 rise | `style_rise_speed` | −4 | `min((relu(v_z,COM − 0.20)/0.10)², 9)` | actuated; a slow rise (~0.17 m/s) is free |
+| velocity | `style_joint_overspeed` | −2.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 3)²` × regu ramp (1/3 → 1) | after the success curriculum |
 
 **Knee geometry** (angle between the hip→knee and knee→ankle joint axes):
 
@@ -130,7 +131,7 @@ mechanically stopped at the straight position before deploying a policy that use
 ## Actuation, assets and curricula
 
 - **Motor torque–speed limit:** the PD torque that accelerates a joint in its direction of motion fades
-  linearly from the 16/6 Nm limit at 4.5 rad/s to 0 at 6 rad/s. Braking torque is unaffected.
+  linearly from the 16/6 Nm limit at 3 rad/s to 0 at 4 rad/s (revision 6; was 4.5 → 6). Braking torque is unaffected.
   - This roughly halves peak joint speed. It is **not** a hard cap: impacts and coupled motion can still
     exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
 - **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `ea7d909d…`).
@@ -149,7 +150,7 @@ mechanically stopped at the straight position before deploying a policy that use
   prone, left, right, intermediate.
 - **Velocity termination (training only):** an episode ends when the 5 ms peak actuated |q̇| exceeds a
   limit.
-  - The limit is off until the success curriculum starts (EMA 0.60), then tightens from 20 to 6 rad/s
+  - The limit is off until the success curriculum starts (EMA 0.60), then tightens from 12 to 5 rad/s (revision 6; was 20 → 6)
     with the same smoothstep (complete at EMA 0.85).
   - A smoke test showed that a fixed 12 rad/s limit ends every early episode: random policies peak at
     15–30 rad/s.
@@ -204,4 +205,18 @@ and the unsupported-ascent cost were cheaper than a slower two-foot rise.
 - Height-credit floor 0.15 → 0.05.
 - Monitors `rise_two_foot_frac` / `rise_one_foot_frac`: share of rising steps (h ≥ 0.10, before first
   standing) with both / exactly one foot above 10% of the weight.
+
+## Revision 6: COM centred between the feet before rising; slow motion
+
+- `ready` also multiplies `exp(−(d_centre/0.03)²)`, where `d_centre` is the COM distance to the centroid of
+  the loaded sole corners (the midpoint between the feet when both are down). Rising credit, the
+  unsupported-ascent cost and the one-foot rise cost all follow from it: the robot must first centre the
+  COM between both feet, then rise on both.
+- `style_one_foot_rise` −12 → −20.
+- Slow motion:
+  - Motor torque–speed limit 6 → 4 rad/s (fade from 3 rad/s), 2 rad/s below the 6 rad/s hardware limit.
+  - Overspeed cost from 3 rad/s (was 4), scale −1 → −2.
+  - Velocity termination 12 → 5 rad/s (was 20 → 6).
+  - `style_rise_speed` (−4): upward COM speed above 0.2 m/s, so a ~1.5 s rise is free and a ballistic
+    0.5 s rise is not.
 

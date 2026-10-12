@@ -153,10 +153,22 @@ def two_foot_share_score(left_n, right_n, full_share, eps=1.0):
   return (share / full_share).clamp(0.0, 1.0)
 
 
-def rise_ready_score(feet_under_com, two_foot, flat_min, com_score):
+def com_centred_score(centre, sigma):
+  """exp(-(d/sigma)^2) of the COM distance to the centroid of the loaded sole
+  corners (the midpoint between the feet when both are down); 0 without support."""
+  return torch.where(torch.isfinite(centre), torch.exp(-(centre / sigma).square()), torch.zeros_like(centre))
+
+
+def rise_ready_score(feet_under_com, two_foot, flat_min, com_score, centred):
   """Pipeline readiness: feet tucked under the COM, both feet down and flat
-  sharing the load, COM over the support. Product, so every step is needed."""
-  return feet_under_com * two_foot * flat_min * com_score
+  sharing the load, COM over the support and centred between the feet.
+  Product, so every step is needed."""
+  return feet_under_com * two_foot * flat_min * com_score * centred
+
+
+def rise_speed_cost(com_vz, threshold, scale, cap):
+  """Squared upward COM speed above `threshold`: getting up slowly is free."""
+  return (torch.relu(com_vz - threshold) / scale).square().clamp(max=cap)
 
 
 def one_foot_rise_cost(loaded, two_foot, rise_gate):

@@ -61,6 +61,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.com_vz = zeros()
     self.com_outside = zeros()
     self.com_score = zeros()
+    self.com_centre = zeros()
     self.sole_centres = zeros(2, 3)
     self.stance_width = zeros()
     self.foot_gap = zeros()
@@ -116,6 +117,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.com_w[:, :2], corners[..., :2].reshape(-1, 8, 2), valid.reshape(-1, 8)
     )
     self.com_outside[:] = torch.where(any_valid, outside, torch.full_like(outside, math.nan))
+    self.com_centre[:] = centre
     self.com_score[:] = geo.com_support_score(
       outside, centre, any_valid, cfg.com_support_sigma_m, cfg.com_centre_sigma_m
     )
@@ -152,6 +154,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.two_foot,
       self.foot_flat.min(dim=1).values,
       self.com_score,
+      geo.com_centred_score(self.com_centre, cfg.ready_com_centre_sigma_m),
     )
     self._update_stage_monitors(load)
 
@@ -277,6 +280,13 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     # Legs pressing on each other (feet stacked, knees/shins/thighs touching).
     actuated = (self.real_episode_length_buf > self.unactuated_time).float()
     return self.leg_contact * self.lift_gate * actuated
+
+  def _reward_rise_speed(self):
+    cfg = self.cfg.staged
+    actuated = (self.real_episode_length_buf > self.unactuated_time).float()
+    return geo.rise_speed_cost(
+      self.com_vz, cfg.rise_speed_threshold_m_s, cfg.rise_speed_scale_m_s, cfg.rise_speed_cost_cap
+    ) * actuated
 
   def _reward_one_foot_rise(self):
     left, right, _ = self._normalized_supports()

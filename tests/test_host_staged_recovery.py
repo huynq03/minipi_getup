@@ -123,11 +123,20 @@ class GeometryTests(unittest.TestCase):
     self.assertEqual(share[2].item(), 0.0)
     self.assertAlmostEqual(share[3].item(), (20 / 68) / 0.3, places=4)
     ones = torch.ones(4)
-    ready = geo.rise_ready_score(ones, share, ones, torch.tensor([1.0, 1.0, 1.0, 0.0]))
+    ready = geo.rise_ready_score(ones, share, ones, torch.tensor([1.0, 1.0, 1.0, 0.0]), ones)
     self.assertEqual(ready[0].item(), 1.0)
     self.assertLess(ready[1].item(), 0.25)
     self.assertEqual(ready[2].item(), 0.0)
     self.assertEqual(ready[3].item(), 0.0)  # COM outside the support
+
+  def test_com_centred_and_rise_speed(self):
+    centre = torch.tensor([0.0, 0.03, math.inf])
+    score = geo.com_centred_score(centre, 0.03)
+    self.assertEqual(score[0].item(), 1.0)
+    self.assertAlmostEqual(score[1].item(), math.exp(-1.0), places=5)
+    self.assertEqual(score[2].item(), 0.0)  # no support at all
+    cost = geo.rise_speed_cost(torch.tensor([0.1, 0.3, 2.0, -1.0]), 0.2, 0.1, 9.0)
+    self.assertTrue(torch.allclose(cost, torch.tensor([0.0, 1.0, 9.0, 0.0])))
 
   def test_one_foot_rise_cost(self):
     loaded = torch.tensor([1.0, 1.0, 0.0, 1.0])
@@ -147,7 +156,7 @@ class TerminationTests(unittest.TestCase):
   def test_velocity_termination_is_off_until_curriculum_then_tightens(self):
     env = object.__new__(StagedRecoveryEnv)
     env.cfg = StagedRecoveryCfg()
-    for strength, expected in ((0.0, math.inf), (1e-3, 20.0 - 14e-3), (0.5, 13.0), (1.0, 6.0)):
+    for strength, expected in ((0.0, math.inf), (1e-3, 12.0 - 7e-3), (0.5, 8.5), (1.0, 5.0)):
       env._penalty_curriculum_strength = lambda s=strength: torch.tensor(s)
       self.assertAlmostEqual(env.velocity_termination_limit().item(), expected, places=4)
 
@@ -178,10 +187,12 @@ class ConfigTests(unittest.TestCase):
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
-                 "style_one_foot_rise"):
+                 "style_one_foot_rise", "style_rise_speed"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
+    self.assertEqual(StagedRecoveryCfg.safe_recovery.overspeed_soft_rad_s, 3.0)
+    self.assertEqual(StagedRecoveryCfg.staged.motor_max_speed_rad_s, 4.0)
     self.assertEqual(StagedRecoveryCfg.curriculum.force, 40)
     self.assertFalse(hasattr(StagedRecoveryCfg.staged, "force_requires_com"))
 
