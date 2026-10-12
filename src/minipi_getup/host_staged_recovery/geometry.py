@@ -141,7 +141,7 @@ def knee_extension_cost(calf, weight, soft_rad, span_rad):
   """Weighted squared knee extension past `soft_rad` (calf < -soft).
 
   Calf 0 is the default 37-degree flexed knee, -0.65 the straight leg, and
-  below that the knee bends backwards (asset limit -2.95 = 132 degrees).
+  below that the knee bends backwards (asset limit -2.5 = 106 degrees).
   """
   return ((torch.relu(-calf - soft_rad) / span_rad).square() * weight).mean(-1)
 

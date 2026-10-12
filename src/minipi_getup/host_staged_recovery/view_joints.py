@@ -150,7 +150,7 @@ def main() -> None:
       ang = knee_flexion_deg(m, d, s)
       state = "straight" if abs(c + 0.65) < 0.02 else ("**bent backwards**" if c < -0.65 else "flexed")
       rows.append(f"`{s}` calf {c:+.2f} rad -> knee {ang:+.0f} deg ({state})")
-    readout.content = ("  \n".join(rows) + "  \ncalf 0 = 37 deg flexed (default), -0.65 = straight, -2.95 = 132 deg backwards"
+    readout.content = ("  \n".join(rows) + "  \ncalf 0 = 37 deg flexed (default), -0.65 = straight, -2.5 = 106 deg backwards"
                        + ik_note)
 
   def on_calf(side):
