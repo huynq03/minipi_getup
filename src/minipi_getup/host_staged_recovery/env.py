@@ -97,9 +97,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.overspeed_out = torch.zeros(n, dtype=torch.bool, device=dev)
     self.two_foot_flat = zeros()
     self.prev_base_h = zeros()
-    self.prev_upright = zeros()
     self.base_vz = zeros()
-    self.upright_rate = zeros()
     self.improper_steps = zeros()
     self.improper_out = torch.zeros(n, dtype=torch.bool, device=dev)
 
@@ -111,13 +109,9 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     vz = (self.com_w[:, 2] - self.com_prev[:, 2]) / self.dt
     self.com_vz[:] = torch.where(self.com_prev_valid, vz, torch.zeros_like(vz))
     self.com_prev.copy_(self.com_w)
-    h_now, up_now = self.root_states[:, 2], -self.projected_gravity[:, 2]
+    h_now = self.root_states[:, 2]
     self.base_vz[:] = torch.where(self.com_prev_valid, (h_now - self.prev_base_h) / self.dt, torch.zeros_like(h_now))
-    self.upright_rate[:] = torch.where(
-      self.com_prev_valid, (up_now - self.prev_upright) / self.dt, torch.zeros_like(up_now)
-    )
     self.prev_base_h.copy_(h_now)
-    self.prev_upright.copy_(up_now)
     self.com_prev_valid.fill_(True)
 
     foot_pos = d.body_link_pos_w[:, self.sole_body_indices]
@@ -199,9 +193,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       (h - cfg.rise_gate_height_center) / cfg.rise_gate_height_width
     ) * (1.0 - self._standing_gate())
     rising = actuated & ~self.ever_stood & (h >= cfg.rise_gate_height_center)
-    band = actuated & ~self.ever_stood & (
-      (h > cfg.improper_rise_height_m) | (-self.projected_gravity[:, 2] > cfg.improper_rise_upright)
-    )
+    band = actuated & ~self.ever_stood & (h > cfg.improper_rise_height_m)
     two_min, com_max, _ = self.improper_rise_thresholds()
     proper = (self.two_foot_flat >= two_min) & (
       torch.nan_to_num(self.com_outside, nan=math.inf) <= com_max
@@ -332,8 +324,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     ) * actuated
 
   def _feet_credit(self):
-    floor = self.cfg.staged.orientation_feet_credit_floor
-    return floor + (1.0 - floor) * self.two_foot_flat
+    # 1 while sitting/kneeling; above feet_first_height_m it needs two flat feet.
+    cfg = self.cfg.staged
+    floor = cfg.orientation_feet_credit_floor
+    high = torch.sigmoid((self.root_states[:, 2] - cfg.feet_first_height_m) / cfg.feet_first_height_width_m)
+    return 1.0 - high * (1.0 - floor) * (1.0 - self.two_foot_flat)
 
   def _reward_orientation(self):
     # Feet first: an upright torso pays only once both flat feet carry the load.
@@ -349,11 +344,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
   def _reward_torso_lift_without_feet(self):
     cfg = self.cfg.staged
     actuated = self.real_episode_length_buf > self.unactuated_time
-    gate = (actuated & ~self.ever_stood).float()
+    high = torch.sigmoid((self.root_states[:, 2] - cfg.torso_lift_height_m) / cfg.torso_lift_height_width_m)
+    gate = (actuated & ~self.ever_stood).float() * high
     return geo.torso_lift_cost(
-      self.base_vz, self.upright_rate, self.two_foot_flat, gate,
-      cfg.torso_lift_vz_threshold_m_s, cfg.torso_lift_vz_scale_m_s,
-      cfg.torso_lift_upright_threshold_s, cfg.torso_lift_upright_scale_s, cfg.torso_lift_cost_cap,
+      self.base_vz, self.two_foot_flat, gate,
+      cfg.torso_lift_vz_threshold_m_s, cfg.torso_lift_vz_scale_m_s, cfg.torso_lift_cost_cap,
     )
 
   def _reward_one_foot_rise(self):

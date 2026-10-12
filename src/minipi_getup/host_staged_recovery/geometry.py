@@ -171,13 +171,11 @@ def rise_speed_cost(com_vz, threshold, scale, cap):
   return (torch.relu(com_vz - threshold) / scale).square().clamp(max=cap)
 
 
-def torso_lift_cost(base_vz, upright_rate, two_foot_flat, gate, vz_threshold, vz_scale,
-                    upright_threshold, upright_scale, cap):
-  """Raising the torso (base height or uprightness increasing) while the robot
-  is not on two flat loaded feet: squared excess rates x (1 - two_foot_flat)."""
-  lift = (torch.relu(base_vz - vz_threshold) / vz_scale).square()
-  tilt_up = (torch.relu(upright_rate - upright_threshold) / upright_scale).square()
-  return (lift + tilt_up).clamp(max=cap) * (1.0 - two_foot_flat) * gate
+def torso_lift_cost(base_vz, two_foot_flat, gate, vz_threshold, vz_scale, cap):
+  """Raising the base while the robot is not on two flat loaded feet:
+  squared excess upward speed x (1 - two_foot_flat) x gate."""
+  lift = (torch.relu(base_vz - vz_threshold) / vz_scale).square().clamp(max=cap)
+  return lift * (1.0 - two_foot_flat) * gate
 
 
 def one_foot_rise_cost(loaded, two_foot, rise_gate):

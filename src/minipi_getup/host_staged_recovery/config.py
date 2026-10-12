@@ -74,21 +74,25 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # improper_rise_termination = False to keep two-foot rising a soft preference.
     # Thresholds tighten with the curriculum strength s: (start at s -> 0, final at s = 1).
     improper_rise_termination = True
-    # Checked while the base is above this height OR the torso is more than 45
-    # degrees up (-g_z > improper_rise_upright), before the first stand.
-    improper_rise_height_m = 0.12
-    improper_rise_upright = 0.707
+    # Checked while the base is above this height (above sitting/kneeling),
+    # before the first stand.
+    improper_rise_height_m = 0.18
     improper_rise_two_foot_min = (0.15, 0.5)
     improper_rise_com_outside_m = (0.10, 0.03)
     improper_rise_steps = (15, 5)
-    # Feet first: torso-orientation rewards (task orientation, target orientation,
-    # ground parallel) keep this fraction until both flat feet carry the load.
+    # Feet first above sitting/kneeling height: with the base above
+    # feet_first_height_m, torso-orientation rewards (task orientation, target
+    # orientation, ground parallel) keep orientation_feet_credit_floor until both
+    # flat feet carry the load. Sitting or kneeling upright is paid in full.
     orientation_feet_credit_floor = 0.1
-    # Torso lift without two flat feet: base vz and uprightness rate above these.
+    feet_first_height_m = 0.16
+    feet_first_height_width_m = 0.02
+    # Base lift without two flat feet, above torso_lift_height_m (sitting up,
+    # rolling and kneeling are free).
+    torso_lift_height_m = 0.14
+    torso_lift_height_width_m = 0.02
     torso_lift_vz_threshold_m_s = 0.02
     torso_lift_vz_scale_m_s = 0.10
-    torso_lift_upright_threshold_s = 0.2
-    torso_lift_upright_scale_s = 1.0
     torso_lift_cost_cap = 9.0
     # One-foot rise penalty: active from this base height until standing.
     rise_gate_height_center = 0.10

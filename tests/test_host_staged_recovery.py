@@ -140,11 +140,10 @@ class GeometryTests(unittest.TestCase):
 
   def test_torso_lift_without_feet(self):
     vz = torch.tensor([0.12, 0.0, 0.12, 0.12])
-    up_rate = torch.tensor([0.0, 1.2, 0.0, 0.0])
     feet = torch.tensor([0.0, 0.0, 1.0, 0.0])
     gate = torch.tensor([1.0, 1.0, 1.0, 0.0])
-    cost = geo.torso_lift_cost(vz, up_rate, feet, gate, 0.02, 0.10, 0.2, 1.0, 9.0)
-    self.assertTrue(torch.allclose(cost, torch.tensor([1.0, 1.0, 0.0, 0.0])))  # lift / tilt up / on feet / gated
+    cost = geo.torso_lift_cost(vz, feet, gate, 0.02, 0.10, 9.0)
+    self.assertTrue(torch.allclose(cost, torch.tensor([1.0, 0.0, 0.0, 0.0])))  # lift / still / on feet / gated
 
   def test_one_foot_rise_cost(self):
     loaded = torch.tensor([1.0, 1.0, 0.0, 1.0])
@@ -221,7 +220,9 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
     self.assertEqual(StagedRecoveryCfg.safe_recovery.overspeed_soft_rad_s, 3.0)
     self.assertEqual(StagedRecoveryCfg.staged.motor_max_speed_rad_s, 4.0)
-    self.assertEqual(StagedRecoveryCfg.staged.improper_rise_height_m, 0.12)
+    self.assertEqual(StagedRecoveryCfg.staged.improper_rise_height_m, 0.18)
+    self.assertEqual(StagedRecoveryCfg.staged.feet_first_height_m, 0.16)
+    self.assertEqual(StagedRecoveryCfg.staged.torso_lift_height_m, 0.14)
     for fn in ("_reward_orientation", "_reward_target_orientation", "_reward_ground_parallel"):
       self.assertIn(fn, StagedRecoveryEnv.__dict__)  # feet-gated overrides
     self.assertEqual(StagedRecoveryCfg.curriculum.force, 40)

@@ -258,3 +258,18 @@ an upright torso whatever supported it, and every feet-related cost started at 0
 - Prone and side resets cannot put the soles down while lying (no arms); they pay B while rolling or
   kneeling the torso up, which pushes them to get the feet under the body first.
 
+## Revision 9: feet first only above sitting/kneeling height
+
+rev-8 `model_500` never stood unassisted (0/500); 45–70% of episodes ended kneeling upright (base
+0.10–0.13 m, knees loaded, no flat foot) with the hips pressed on their inner limits. Moving from sitting
+or kneeling onto two flat feet always lifts the hips while the feet are not yet flat, and prone/side
+resets must raise the torso before the feet can get under the body; A and B charged exactly those
+transitions, so kneeling (10% orientation credit, ~−0.9 knee cost) was the cheapest place to stay. C never
+switched on because the two-foot success EMA stayed 0.
+
+- A: the feet credit applies only above a base height of 0.16 m (σ width 0.02); sitting or kneeling upright
+  is paid in full.
+- B: only base-height increase (no uprightness rate), only above 0.14 m.
+- C: base above 0.18 m only (no torso-angle trigger).
+- Flat-feet definition, one-foot rise (−20), rise speed (−15) and the curriculum-scaled termination stay.
+
