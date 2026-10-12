@@ -1,4 +1,5 @@
-"""Train the staged-recovery policy from scratch (fresh actor, four critics, optimizer)."""
+"""Train the staged-recovery policy from scratch (fresh actor, four critics, optimizer),
+or resume a checkpoint of the same variant and asset with --resume."""
 
 from __future__ import annotations
 
@@ -8,6 +9,8 @@ import subprocess
 import types
 from datetime import datetime
 from pathlib import Path
+
+import torch
 
 from minipi_getup.host.config import class_to_dict
 from minipi_getup.host.train import set_seed
@@ -39,6 +42,7 @@ def main() -> None:
   p.add_argument("--allow-busy-gpu", action="store_true")
   p.add_argument("--allow-dirty", action="store_true", help="smoke tests only")
   p.add_argument("--run-name", default="")
+  p.add_argument("--resume", type=Path, help="checkpoint to continue; --max-iterations are added to its iteration")
   args = p.parse_args()
   if args.num_envs < 1 or args.max_iterations < 1:
     p.error("--num-envs and --max-iterations must be positive")
@@ -80,7 +84,7 @@ def main() -> None:
     "seed": args.seed,
     "num_envs": args.num_envs,
     "max_iterations": args.max_iterations,
-    "resume": None,
+    "resume": str(args.resume) if args.resume else None,
     "action_std_bounds": [args.min_action_std, args.max_action_std],
     "reward_scales_raw": class_to_dict(cfg.constraints.scales),
     "env_cfg": class_to_dict(cfg),
@@ -89,6 +93,17 @@ def main() -> None:
   (logdir / "config.json").write_text(json.dumps(metadata, indent=2, default=str))
   runner = OnPolicyRunner(env, cfg, class_to_dict(pcfg), str(logdir), device=args.device)
   install_action_std_guard(runner.alg, args.min_action_std, args.max_action_std)
+  if args.resume:
+    checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
+    info = checkpoint.get("infos") or {}
+    if info.get("variant") != EXPERIMENT_NAME or info.get("asset_sha256") != manifest[ASSET_XML.name]:
+      p.error("checkpoint is not compatible with this variant and asset")
+    runner.load(str(args.resume))
+    state = info.get("curriculum_state") or {}
+    for name in ("force", "action_rescale", "penalty_success_ema"):
+      if name in state:
+        saved = state[name].to(env.device)
+        getattr(env, name).copy_(saved if saved.shape == getattr(env, name).shape else saved.mean().expand_as(getattr(env, name)))
 
   old_save = runner.save
   def save(self, path, infos=None, it=None):
@@ -105,7 +120,7 @@ def main() -> None:
   runner.save = types.MethodType(save, runner)
 
   print(
-    f"[{EXPERIMENT_NAME}] scratch; seed={args.seed}; commit={commit}; asset={ASSET_XML}; "
+    f"[{EXPERIMENT_NAME}] {'resume ' + str(args.resume) if args.resume else 'scratch'}; seed={args.seed}; commit={commit}; asset={ASSET_XML}; "
     f"sha256={manifest[ASSET_XML.name]}; logs={logdir}", flush=True
   )
   runner.learn(args.max_iterations, init_at_random_ep_len=pcfg.runner.init_at_random_ep_len)
