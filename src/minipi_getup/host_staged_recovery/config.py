@@ -56,7 +56,7 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     unsupported_ascent_scale_m_s = 0.20
     # Reverse knee: calf < 0 bends the knee backwards toward the -0.65 stop.
     # Knee geometry: calf 0 = 37 deg flexed (default), -0.65 = straight leg,
-    # below -0.65 = bent backwards (asset limit -1.65). Standing penalizes calf
+    # below -0.65 = bent backwards (asset limit -2.0 = 77 deg). Standing penalizes calf
     # below -0.25 (< ~22 deg flexion), 1.0 at straight, growing when reversed.
     knee_extension_soft_rad = 0.25
     knee_straight_rad = -0.65
