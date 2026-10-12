@@ -109,6 +109,17 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     swing_unloaded_weight_fraction = 0.05
     swing_free_s = 0.2
     swing_max_s = 0.4
+    # Anti-tapping: the swing timer restarts only after the foot has carried at
+    # least swing_touchdown_weight_fraction of the weight for swing_touchdown_hold_s,
+    # and at most swing_budget_s of exemption is granted per episode.
+    swing_touchdown_weight_fraction = 0.15
+    swing_touchdown_hold_s = 0.25
+    swing_budget_s = 1.0
+    # Feet under the hips (task space): a loaded flat sole more than this far
+    # outside its hip along the lateral axis (default stance: 0.057 m) pays.
+    foot_splay_free_m = 0.10
+    foot_splay_scale_m = 0.04
+    foot_splay_cost_cap = 9.0
     # One-foot rise penalty: active from this base height until standing.
     rise_gate_height_center = 0.10
     rise_gate_height_width = 0.02
@@ -162,6 +173,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       style_rise_speed = -15.0
       # Do not drag loaded flat feet (sideways counts double); step instead.
       style_loaded_foot_drag = -8.0
+      # Plant the soles under the hips (bend the knees) instead of splaying a leg out.
+      style_loaded_foot_splay = -6.0
       # Feet first: raising the torso before both flat feet carry the load.
       style_torso_lift_without_feet = -10.0
       # Standing-gated only: straight or reversed knees are free while getting

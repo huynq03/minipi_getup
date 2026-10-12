@@ -283,7 +283,7 @@ as in rev 6. Feet first is enforced by B (base lift above 0.14 m without two fla
 termination above 0.18 m with the curriculum), which charge *how* the robot rises without making rising
 itself unprofitable.
 
-## Revision 11: no dragging loaded feet; rise wide, then step in
+## Revision 11: no dragging loaded feet; soles under the hips; short steps allowed
 
 rev-10 `model_1000` rose on two flat feet (18–58% of rising steps, rev 6: 0%) but planted them wide and
 then slid them together under the COM while loaded: 17–24 cm of rising slip per episode (supine/side,
@@ -295,9 +295,19 @@ stance-width cost pulled the feet together during the rise.
 - `style_loaded_foot_drag` (−8): per foot `support · flat · min(2·(relu(|v_lat| − 0.02)/0.05)² +
   (relu(|v_fwd| − 0.02)/0.05)², 9)`, sole-centre velocity, lateral = robot left; summed over feet,
   after actuation (rising and standing).
-- Stance: feet too close/crossing pays whenever a foot is loaded; too wide (> 0.26 m) pays only under the
-  standing gate, so the robot may rise wide and step in once up.
+- Why the stance was wide: in every orientation one leg sat on its inner hip-roll stop (−7°) while the
+  other splayed out 29–36° with the ankle roll compensating, both knees ~+1.0. A joint stop is free
+  support under the relative action law, nothing charged a loaded foot placed far to the side of its hip
+  (`loaded_hip_roll_excess` is off in staged; `stance_width` only sees the distance between the feet), and
+  a narrow flat-footed squat is kinematically possible from a base height of ~0.19 m, where most rev-10
+  flat-footed rising happens.
+- `style_loaded_foot_splay` (−6): per foot `support · flat · min((relu(d_out − 0.10)/0.04)², 9)`, `d_out` =
+  sole centre outside its hip-pitch body along the lateral axis (default stance 0.057 m). Task space: it
+  charges the splayed sole, not a joint.
+- The stance-width cost stays as in rev 10 (also while rising).
 - Short steps: a foot below 5% of the weight for ≤ 0.2 s (fading to 0 at 0.4 s) while the other foot
   stands is exempt from `style_one_foot_rise` and `style_standing_load_imbalance`, and counts as a proper
   rise for the improper-rise check if the standing sole is flat and the COM is inside its support.
+  Anti-tapping: the swing timer restarts only after the foot has carried ≥ 15% of the weight for 0.25 s
+  (brief taps freeze it), and at most 1 s of exemption is granted per episode (`swing_exempt_time_s`).
 

@@ -191,6 +191,18 @@ def foot_drag_cost(foot_vel_xy, lateral, weight, deadband, scale, lateral_gain, 
   return (cost * weight).sum(-1)
 
 
+def foot_outward_offset(sole_xy, hip_xy, lateral):
+  """Horizontal distance of each sole centre outside its hip along the robot's
+  lateral axis (left foot to the left, right foot to the right). (N, 2)."""
+  rel = ((sole_xy - hip_xy) * lateral[:, None]).sum(-1)
+  return torch.stack((rel[:, 0], -rel[:, 1]), -1)
+
+
+def foot_splay_cost(offset, weight, free_m, scale_m, cap):
+  """Loaded sole placed out to the side of its hip beyond `free_m`."""
+  return ((torch.relu(offset - free_m) / scale_m).square().clamp(max=cap) * weight).sum(-1)
+
+
 def swing_credit(air_time, free_s, max_s):
   """1 for a foot that has been off the ground at most `free_s`, falling to 0
   at `max_s`: a short lift to re-place a foot is exempt, standing on one foot is not."""

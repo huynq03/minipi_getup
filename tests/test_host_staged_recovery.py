@@ -155,6 +155,17 @@ class GeometryTests(unittest.TestCase):
     slow = geo.foot_drag_cost(vel * 0.2, lateral, torch.ones(1, 2), 0.02, 0.05, 2.0, 9.0)
     self.assertEqual(slow.item(), 0.0)
 
+  def test_foot_splay_is_outward_offset_from_the_hip(self):
+    lateral = torch.tensor([[0.0, 1.0]])
+    hip = torch.tensor([[[0.0, 0.023], [0.0, -0.023]]])
+    sole = torch.tensor([[[0.0, 0.08], [0.0, -0.25]]])  # left under the hip, right splayed out
+    off = geo.foot_outward_offset(sole, hip, lateral)
+    self.assertTrue(torch.allclose(off, torch.tensor([[0.057, 0.227]]), atol=1e-5))
+    cost = geo.foot_splay_cost(off, torch.ones(1, 2), 0.10, 0.04, 9.0)
+    self.assertAlmostEqual(cost.item(), 9.0, places=4)  # (0.127 / 0.04)^2 capped; the left foot is free
+    crossed = geo.foot_outward_offset(torch.tensor([[[0.0, -0.05], [0.0, 0.05]]]), hip, lateral)
+    self.assertEqual(geo.foot_splay_cost(crossed, torch.ones(1, 2), 0.10, 0.04, 9.0).item(), 0.0)
+
   def test_swing_credit(self):
     credit = geo.swing_credit(torch.tensor([0.0, 0.2, 0.3, 0.4, 1.0]), 0.2, 0.4)
     self.assertTrue(torch.allclose(credit, torch.tensor([1.0, 1.0, 0.5, 0.0, 0.0])))
@@ -229,7 +240,7 @@ class ConfigTests(unittest.TestCase):
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
                  "style_one_foot_rise", "style_rise_speed", "style_torso_lift_without_feet",
-                 "style_loaded_foot_drag"):
+                 "style_loaded_foot_drag", "style_loaded_foot_splay"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
