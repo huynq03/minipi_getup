@@ -75,15 +75,15 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 1 legs in | `target_feet_under_com` | +3 | mean over feet of `exp(−(relu(‖foot_xy − COM_xy‖ − 0.12)/0.08)²)` | always (also satisfied when standing) |
 | 2 feet down | `target_two_foot_flat_support` | +4 | `share₂ · max(sup_L, sup_R) · flat_L · flat_R`, with `share₂ = clip(min(F_L,F_R)/(F_L+F_R) / 0.3)` and `flat = exp(−(tilt/0.15)²)` | always; one-foot standing (4% share) earns ~0.13 |
 | 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · max(sup_L, sup_R) · lift` | either foot loaded, torso up; a foot resting on or crossing the other also pays |
-| 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · lift` | both feet loaded, torso up |
+| 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · min(flat) · lift` | both feet loaded, torso up |
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.05 + 0.95·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score · exp(−(d_centre/0.03)²)` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.05 keeps an early gradient |
-| 4 rise | `style_one_foot_rise` | −20 | `max(sup_L, sup_R) · (1 − share₂) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
+| 4 rise | `style_one_foot_rise` | −20 | `max(sup_L, sup_R) · (1 − share₂·min(flat)) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − ready) · lift` | after actuation starts |
 | 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 31.6 at the −2.5 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
-| 4 rise | `style_rise_speed` | −4 | `min((relu(v_z,COM − 0.20)/0.10)², 9)` | actuated; a slow rise (~0.17 m/s) is free |
+| 4 rise | `style_rise_speed` | −15 | `min((relu(v_z,COM − 0.20)/0.10)², 9)` | actuated; a slow rise (~0.17 m/s) is free |
 | velocity | `style_joint_overspeed` | −2.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 3)²` × regu ramp (1/3 → 1) | after the success curriculum |
 
 **Knee geometry** (angle between the hip→knee and knee→ankle joint axes):
@@ -219,4 +219,42 @@ and the unsupported-ascent cost were cheaper than a slower two-foot rise.
   - Velocity termination 12 → 5 rad/s (was 20 → 6).
   - `style_rise_speed` (−4): upward COM speed above 0.2 m/s, so a ~1.5 s rise is free and a ballistic
     0.5 s rise is not.
+
+## Revision 7: rising on two flat feet is enforced
+
+rev-6 `model_600` from supine: the right leg splayed out (hip roll −1.33) and pushed, while the left knee
+was reversed (−1.2) and the left foot propped on its edge/toe with the sole centre ~8 cm up. The force-only
+two-foot share counted that as two feet, and the rise lasts only 0.15–0.3 s, so per-step penalties were
+cheaper than standing up early (COM rose at 0.5–0.75 m/s).
+
+- `share₂·min(flat_L, flat_R)` (two loaded *flat* feet) replaces the force-only share in
+  `style_one_foot_rise` and `target_com_support`.
+- **Improper-rise termination** (training only, `improper_rise_termination`): before the first stand,
+  with the base above 0.18 m and the torso up (`−g_z > 0.5`; revision 8: base above 0.12 m **or** torso
+  more than 45° up), the episode ends after N consecutive steps
+  with `share₂·min(flat)` below a minimum or the COM too far outside the support polygon. It switches on
+  with the penalty curriculum (strength s > 0), like the velocity termination, so the robot first learns
+  to stand at all, and tightens with s: minimum 0.15 → 0.5, COM 10 → 3 cm outside, N 15 → 5 steps
+  (0.3 → 0.1 s). With the final thresholds from the start, every rev-6 `model_600` episode in all five
+  orientations was cut (0.55–0.8 s after actuation), leaving no learning signal. Upright kneeling (base ≈ 0.22 m) is cut by it too. Logged as
+  `term_improper_rise`. Evaluation and playback disable it.
+- `style_rise_speed` −4 → −15.
+
+## Revision 8: feet first in every orientation
+
+rev-6 `model_700` raised and straightened the torso before the feet were down: from supine the torso was
+upright (−g_z 0.92) at 0.30 s with no foot on the ground, and two flat feet carried the load only from
+~0.66 s at a base height of 0.325 m. Whenever both feet were loaded during the rise, the more tilted foot
+was at a median 67° (edge/toe). The largest reward, the task orientation term (~40 per episode), paid for
+an upright torso whatever supported it, and every feet-related cost started at 0.10–0.14 m.
+
+- **A, feet-gated torso rewards:** `task_orientation`, `target_target_orientation` and
+  `style_ground_parallel` × `0.1 + 0.9·share₂·min(flat)`.
+- **B, `style_torso_lift_without_feet` (−10):**
+  `min((relu(v_z,base − 0.02)/0.10)² + (relu(d(−g_z)/dt − 0.2)/1.0)², 9) · (1 − share₂·min(flat))`, from
+  actuation until the first stand, at any height (sitting up counts).
+- **C, earlier improper-rise check:** base above 0.12 m (was 0.18) or torso more than 45° up
+  (`−g_z > 0.707`).
+- Prone and side resets cannot put the soles down while lying (no arms); they pay B while rolling or
+  kneeling the torso up, which pushes them to get the feet under the body first.
 

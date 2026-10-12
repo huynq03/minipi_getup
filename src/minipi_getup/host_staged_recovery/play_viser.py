@@ -13,6 +13,7 @@ def make_cfg(dr, scale, episode):
   cfg.curriculum.pull_force = False
   cfg.env.test = True
   cfg.staged.velocity_termination = False
+  cfg.staged.improper_rise_termination = False
   if not dr:
     for key in dir(cfg.domain_rand):
       if key.startswith("randomize_") or key == "delay":

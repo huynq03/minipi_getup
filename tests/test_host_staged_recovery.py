@@ -138,6 +138,14 @@ class GeometryTests(unittest.TestCase):
     cost = geo.rise_speed_cost(torch.tensor([0.1, 0.3, 2.0, -1.0]), 0.2, 0.1, 9.0)
     self.assertTrue(torch.allclose(cost, torch.tensor([0.0, 1.0, 9.0, 0.0])))
 
+  def test_torso_lift_without_feet(self):
+    vz = torch.tensor([0.12, 0.0, 0.12, 0.12])
+    up_rate = torch.tensor([0.0, 1.2, 0.0, 0.0])
+    feet = torch.tensor([0.0, 0.0, 1.0, 0.0])
+    gate = torch.tensor([1.0, 1.0, 1.0, 0.0])
+    cost = geo.torso_lift_cost(vz, up_rate, feet, gate, 0.02, 0.10, 0.2, 1.0, 9.0)
+    self.assertTrue(torch.allclose(cost, torch.tensor([1.0, 1.0, 0.0, 0.0])))  # lift / tilt up / on feet / gated
+
   def test_one_foot_rise_cost(self):
     loaded = torch.tensor([1.0, 1.0, 0.0, 1.0])
     two_foot = torch.tensor([0.0, 1.0, 0.0, 0.0])
@@ -159,6 +167,26 @@ class TerminationTests(unittest.TestCase):
     for strength, expected in ((0.0, math.inf), (1e-3, 12.0 - 7e-3), (0.5, 8.5), (1.0, 5.0)):
       env._penalty_curriculum_strength = lambda s=strength: torch.tensor(s)
       self.assertAlmostEqual(env.velocity_termination_limit().item(), expected, places=4)
+
+
+  def test_improper_rise_termination_needs_curriculum_and_persistence(self):
+    env = object.__new__(StagedRecoveryEnv)
+    env.cfg = StagedRecoveryCfg()
+    env.improper_steps = torch.tensor([0.0, 4.0, 5.0, 9.0, 15.0])
+    env._penalty_curriculum_strength = lambda: torch.tensor(0.0)
+    self.assertFalse(env.improper_rise_out().any())  # off before the curriculum
+    env._penalty_curriculum_strength = lambda: torch.tensor(1e-3)
+    self.assertEqual(env.improper_rise_out().tolist(), [False, False, False, False, True])  # 15 steps
+    two_min, com_max, _ = env.improper_rise_thresholds()
+    self.assertAlmostEqual(two_min.item(), 0.15, places=3)
+    self.assertAlmostEqual(com_max.item(), 0.10, places=3)
+    env._penalty_curriculum_strength = lambda: torch.tensor(1.0)
+    self.assertEqual(env.improper_rise_out().tolist(), [False, False, True, True, True])  # 5 steps
+    two_min, com_max, _ = env.improper_rise_thresholds()
+    self.assertAlmostEqual(two_min.item(), 0.5, places=5)
+    self.assertAlmostEqual(com_max.item(), 0.03, places=5)
+    env.cfg.staged.improper_rise_termination = False
+    self.assertFalse(env.improper_rise_out().any())
 
 
 class ConfigTests(unittest.TestCase):
@@ -187,12 +215,15 @@ class ConfigTests(unittest.TestCase):
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
-                 "style_one_foot_rise", "style_rise_speed"):
+                 "style_one_foot_rise", "style_rise_speed", "style_torso_lift_without_feet"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
     self.assertEqual(StagedRecoveryCfg.safe_recovery.overspeed_soft_rad_s, 3.0)
     self.assertEqual(StagedRecoveryCfg.staged.motor_max_speed_rad_s, 4.0)
+    self.assertEqual(StagedRecoveryCfg.staged.improper_rise_height_m, 0.12)
+    for fn in ("_reward_orientation", "_reward_target_orientation", "_reward_ground_parallel"):
+      self.assertIn(fn, StagedRecoveryEnv.__dict__)  # feet-gated overrides
     self.assertEqual(StagedRecoveryCfg.curriculum.force, 40)
     self.assertFalse(hasattr(StagedRecoveryCfg.staged, "force_requires_com"))
 

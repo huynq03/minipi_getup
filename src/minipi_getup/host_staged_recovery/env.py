@@ -95,6 +95,13 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.actuated_peak_vel = zeros()
     self.step_peak_qd = zeros(self.num_dof)
     self.overspeed_out = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.two_foot_flat = zeros()
+    self.prev_base_h = zeros()
+    self.prev_upright = zeros()
+    self.base_vz = zeros()
+    self.upright_rate = zeros()
+    self.improper_steps = zeros()
+    self.improper_out = torch.zeros(n, dtype=torch.bool, device=dev)
 
   # ------------------------------------------------------------------ geometry
   def _update_stage_state(self):
@@ -104,6 +111,13 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     vz = (self.com_w[:, 2] - self.com_prev[:, 2]) / self.dt
     self.com_vz[:] = torch.where(self.com_prev_valid, vz, torch.zeros_like(vz))
     self.com_prev.copy_(self.com_w)
+    h_now, up_now = self.root_states[:, 2], -self.projected_gravity[:, 2]
+    self.base_vz[:] = torch.where(self.com_prev_valid, (h_now - self.prev_base_h) / self.dt, torch.zeros_like(h_now))
+    self.upright_rate[:] = torch.where(
+      self.com_prev_valid, (up_now - self.prev_upright) / self.dt, torch.zeros_like(up_now)
+    )
+    self.prev_base_h.copy_(h_now)
+    self.prev_upright.copy_(up_now)
     self.com_prev_valid.fill_(True)
 
     foot_pos = d.body_link_pos_w[:, self.sole_body_indices]
@@ -149,6 +163,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
     force_l, force_r, _ = self._ground_support_forces()
     self.two_foot[:] = geo.two_foot_share_score(force_l, force_r, cfg.two_foot_full_share)
+    # Both feet loaded AND flat: a foot propped on its edge or toe does not count.
+    self.two_foot_flat[:] = self.two_foot * self.foot_flat.min(dim=1).values
     self.ready[:] = geo.rise_ready_score(
       self._reward_feet_under_com(),
       self.two_foot,
@@ -183,6 +199,14 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       (h - cfg.rise_gate_height_center) / cfg.rise_gate_height_width
     ) * (1.0 - self._standing_gate())
     rising = actuated & ~self.ever_stood & (h >= cfg.rise_gate_height_center)
+    band = actuated & ~self.ever_stood & (
+      (h > cfg.improper_rise_height_m) | (-self.projected_gravity[:, 2] > cfg.improper_rise_upright)
+    )
+    two_min, com_max, _ = self.improper_rise_thresholds()
+    proper = (self.two_foot_flat >= two_min) & (
+      torch.nan_to_num(self.com_outside, nan=math.inf) <= com_max
+    )
+    self.improper_steps[:] = torch.where(band & ~proper, self.improper_steps + 1.0, torch.zeros_like(h))
     weight = weight_of(self)
     fl, fr, _ = self._ground_support_forces()
     on_l, on_r = fl > 0.1 * weight, fr > 0.1 * weight
@@ -223,6 +247,25 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     if not self.cfg.staged.velocity_termination:
       self.overspeed_out[:] = False
     self.reset_buf |= self.overspeed_out
+    self.improper_out = self.improper_rise_out() & ~self.overspeed_out
+    self.reset_buf |= self.improper_out
+
+  def improper_rise_thresholds(self):
+    """(min two-foot-flat score, max COM distance outside the support, steps),
+    interpolated from start to final by the penalty curriculum strength."""
+    cfg = self.cfg.staged
+    s = self._penalty_curriculum_strength()
+    lerp = lambda pair: pair[0] + s * (pair[1] - pair[0])  # noqa: E731
+    return lerp(cfg.improper_rise_two_foot_min), lerp(cfg.improper_rise_com_outside_m), torch.round(
+      lerp(cfg.improper_rise_steps)
+    )
+
+  def improper_rise_out(self) -> torch.Tensor:
+    """Rising without two flat loaded feet or with the COM outside the support
+    for the required steps; active once the penalty curriculum starts."""
+    _, _, steps = self.improper_rise_thresholds()
+    out = (self.improper_steps >= steps) & (self._penalty_curriculum_strength() > 0)
+    return out & self.cfg.staged.improper_rise_termination
 
   def compute_reward(self):
     self._update_stage_state()
@@ -245,8 +288,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     return self.two_foot * loaded * self.foot_flat[:, 0] * self.foot_flat[:, 1]
 
   def _reward_com_support(self):
-    # COM over the support of both feet: one-foot balance does not count.
-    return self.com_score * self.two_foot * self.lift_gate
+    # COM over the support of both flat feet: one-foot balance does not count.
+    return self.com_score * self.two_foot_flat * self.lift_gate
 
   def _reward_stance_width(self):
     cfg = self.cfg.staged
@@ -288,9 +331,34 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.com_vz, cfg.rise_speed_threshold_m_s, cfg.rise_speed_scale_m_s, cfg.rise_speed_cost_cap
     ) * actuated
 
+  def _feet_credit(self):
+    floor = self.cfg.staged.orientation_feet_credit_floor
+    return floor + (1.0 - floor) * self.two_foot_flat
+
+  def _reward_orientation(self):
+    # Feet first: an upright torso pays only once both flat feet carry the load.
+    return super()._reward_orientation() * self._feet_credit()
+
+  def _reward_target_orientation(self):
+    return super()._reward_target_orientation() * self._feet_credit()
+
+  def _reward_ground_parallel(self):
+    # Feet parallel to the ground count when they are on it, not in the air.
+    return super()._reward_ground_parallel() * self._feet_credit()
+
+  def _reward_torso_lift_without_feet(self):
+    cfg = self.cfg.staged
+    actuated = self.real_episode_length_buf > self.unactuated_time
+    gate = (actuated & ~self.ever_stood).float()
+    return geo.torso_lift_cost(
+      self.base_vz, self.upright_rate, self.two_foot_flat, gate,
+      cfg.torso_lift_vz_threshold_m_s, cfg.torso_lift_vz_scale_m_s,
+      cfg.torso_lift_upright_threshold_s, cfg.torso_lift_upright_scale_s, cfg.torso_lift_cost_cap,
+    )
+
   def _reward_one_foot_rise(self):
     left, right, _ = self._normalized_supports()
-    return geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot, self.rise_gate)
+    return geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot_flat, self.rise_gate)
 
   def _reward_standing_load_imbalance(self):
     left, right, _ = self._ground_support_forces()
@@ -389,6 +457,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["knee_contact_time_s"] = self.ep_knee_time[env_ids].mean()
     s["leg_contact_time_s"] = self.ep_leg_contact_time[env_ids].mean()
     s["term_overspeed"] = self.overspeed_out[env_ids].float().mean()
+    s["term_improper_rise"] = self.improper_out[env_ids].float().mean()
     s["velocity_termination_limit"] = self.velocity_termination_limit().reshape(-1)[0]
     steps = self.ep_standing_steps[env_ids].clamp_min(1.0)
     s["knee_extended_standing_frac"] = (self.ep_knee_extended_standing[env_ids] / steps).mean()
@@ -416,6 +485,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.rise_supported[env_ids] = False
       self.ep_ready_before_rise[env_ids] = False
       self.ep_rise_steps[env_ids] = 0.0
+      self.improper_steps[env_ids] = 0.0
       self.ep_rise_two_foot_steps[env_ids] = 0.0
       self.ep_rise_one_foot_steps[env_ids] = 0.0
       self.prev_height[env_ids] = 0.0

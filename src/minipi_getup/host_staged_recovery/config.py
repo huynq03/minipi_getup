@@ -65,6 +65,31 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     rise_speed_threshold_m_s = 0.20
     rise_speed_scale_m_s = 0.10
     rise_speed_cost_cap = 9.0
+    # Improper-rise termination (training only): before the first stand, with the
+    # base above this height and the torso up, the episode ends if for
+    # improper_rise_steps consecutive steps the robot is not on two flat loaded
+    # feet (two_foot x min(flat) < improper_rise_two_foot_min) or the COM is more
+    # than improper_rise_com_outside_m outside the support polygon. Enabled with
+    # the penalty curriculum (like the velocity termination). Set
+    # improper_rise_termination = False to keep two-foot rising a soft preference.
+    # Thresholds tighten with the curriculum strength s: (start at s -> 0, final at s = 1).
+    improper_rise_termination = True
+    # Checked while the base is above this height OR the torso is more than 45
+    # degrees up (-g_z > improper_rise_upright), before the first stand.
+    improper_rise_height_m = 0.12
+    improper_rise_upright = 0.707
+    improper_rise_two_foot_min = (0.15, 0.5)
+    improper_rise_com_outside_m = (0.10, 0.03)
+    improper_rise_steps = (15, 5)
+    # Feet first: torso-orientation rewards (task orientation, target orientation,
+    # ground parallel) keep this fraction until both flat feet carry the load.
+    orientation_feet_credit_floor = 0.1
+    # Torso lift without two flat feet: base vz and uprightness rate above these.
+    torso_lift_vz_threshold_m_s = 0.02
+    torso_lift_vz_scale_m_s = 0.10
+    torso_lift_upright_threshold_s = 0.2
+    torso_lift_upright_scale_s = 1.0
+    torso_lift_cost_cap = 9.0
     # One-foot rise penalty: active from this base height until standing.
     rise_gate_height_center = 0.10
     rise_gate_height_width = 0.02
@@ -115,7 +140,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       # Getting up must use both feet: any rising step with the load on one foot pays.
       style_one_foot_rise = -20.0
       # Get up slowly: upward COM speed above 0.2 m/s.
-      style_rise_speed = -4.0
+      style_rise_speed = -15.0
+      # Feet first: raising the torso before both flat feet carry the load.
+      style_torso_lift_without_feet = -10.0
       # Standing-gated only: straight or reversed knees are free while getting
       # up but must return toward the flexed default once standing.
       style_standing_knee_extension = -16.0
