@@ -283,3 +283,21 @@ as in rev 6. Feet first is enforced by B (base lift above 0.14 m without two fla
 termination above 0.18 m with the curriculum), which charge *how* the robot rises without making rising
 itself unprofitable.
 
+## Revision 11: no dragging loaded feet; rise wide, then step in
+
+rev-10 `model_1000` rose on two flat feet (18–58% of rising steps, rev 6: 0%) but planted them wide and
+then slid them together under the COM while loaded: 17–24 cm of rising slip per episode (supine/side,
+70–78% of it sideways-inward, 100% toward the COM, mostly above 0.15 m). Prone slid only 6 cm because its
+feet were flat and loaded for 0.14 foot-s instead of 0.5–0.75. Closing the stance by lifting a foot was
+charged by the one-foot rise cost, the standing load imbalance and the improper-rise check, while the
+stance-width cost pulled the feet together during the rise.
+
+- `style_loaded_foot_drag` (−8): per foot `support · flat · min(2·(relu(|v_lat| − 0.02)/0.05)² +
+  (relu(|v_fwd| − 0.02)/0.05)², 9)`, sole-centre velocity, lateral = robot left; summed over feet,
+  after actuation (rising and standing).
+- Stance: feet too close/crossing pays whenever a foot is loaded; too wide (> 0.26 m) pays only under the
+  standing gate, so the robot may rise wide and step in once up.
+- Short steps: a foot below 5% of the weight for ≤ 0.2 s (fading to 0 at 0.4 s) while the other foot
+  stands is exempt from `style_one_foot_rise` and `style_standing_load_imbalance`, and counts as a proper
+  rise for the improper-rise check if the standing sole is flat and the COM is inside its support.
+

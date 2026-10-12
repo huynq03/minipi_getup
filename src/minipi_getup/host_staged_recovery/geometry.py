@@ -178,6 +178,25 @@ def torso_lift_cost(base_vz, two_foot_flat, gate, vz_threshold, vz_scale, cap):
   return lift * (1.0 - two_foot_flat) * gate
 
 
+def foot_drag_cost(foot_vel_xy, lateral, weight, deadband, scale, lateral_gain, cap):
+  """Dragging a loaded foot: squared horizontal sole speed above `deadband`,
+  with the sideways (robot-lateral) part weighted by `lateral_gain`.
+
+  foot_vel_xy (N, 2, 2) sole-centre velocity; lateral (N, 2) unit robot-left
+  axis; weight (N, 2) per-foot load x flatness. Summed over feet."""
+  lat = (foot_vel_xy * lateral[:, None]).sum(-1)
+  fwd = (foot_vel_xy * torch.stack((lateral[:, 1], -lateral[:, 0]), -1)[:, None]).sum(-1)
+  excess = lambda v: (torch.relu(v.abs() - deadband) / scale).square()  # noqa: E731
+  cost = (lateral_gain * excess(lat) + excess(fwd)).clamp(max=cap)
+  return (cost * weight).sum(-1)
+
+
+def swing_credit(air_time, free_s, max_s):
+  """1 for a foot that has been off the ground at most `free_s`, falling to 0
+  at `max_s`: a short lift to re-place a foot is exempt, standing on one foot is not."""
+  return (1.0 - (air_time - free_s) / (max_s - free_s)).clamp(0.0, 1.0)
+
+
 def one_foot_rise_cost(loaded, two_foot, rise_gate):
   """Rising with the load on one foot: (most loaded foot's support) x
   (1 - two-foot share score) x rise gate. Zero for an even two-foot push, and

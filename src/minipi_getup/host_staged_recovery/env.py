@@ -96,6 +96,12 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.step_peak_qd = zeros(self.num_dof)
     self.overspeed_out = torch.zeros(n, dtype=torch.bool, device=dev)
     self.two_foot_flat = zeros()
+    self.prev_sole_xy = zeros(2, 2)
+    self.foot_prev_valid = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.foot_vel_xy = zeros(2, 2)
+    self.foot_air_time = zeros(2)
+    self.swing_exempt = zeros()
+    self.lateral = zeros(2)
     self.prev_base_h = zeros()
     self.base_vz = zeros()
     self.improper_steps = zeros()
@@ -118,6 +124,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     foot_quat = d.body_link_quat_w[:, self.sole_body_indices]
     corners = geo.sole_corners_world(foot_pos, foot_quat)
     self.sole_centres[:] = corners.mean(2)
+    xy = self.sole_centres[..., :2]
+    valid = self.foot_prev_valid[:, None, None]
+    self.foot_vel_xy[:] = torch.where(valid, (xy - self.prev_sole_xy) / self.dt, torch.zeros_like(xy))
+    self.prev_sole_xy.copy_(xy)
+    self.foot_prev_valid.fill_(True)
     left, right, _ = self._normalized_supports()
     load = torch.stack((left, right), dim=1)
     valid = (corners[..., 2] < cfg.corner_contact_height_m) & (load[:, :, None] > cfg.support_foot_min)
@@ -131,7 +142,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     )
     delta = self.sole_centres[:, 0, :2] - self.sole_centres[:, 1, :2]
     self.stance_width[:] = torch.linalg.vector_norm(delta, dim=-1)
-    self.foot_gap[:] = geo.foot_lateral_gap(corners, geo.lateral_axis(self.root_states[:, 3:7], foot_quat))
+    self.lateral[:] = geo.lateral_axis(self.root_states[:, 3:7], foot_quat)
+    self.foot_gap[:] = geo.foot_lateral_gap(corners, self.lateral)
     self.foot_flat[:] = 1.0 - _sole_tilt_cost(foot_quat, self.cfg.safe_recovery.sole_tilt_sigma_rad)
     self.lift_gate[:] = torch.sigmoid(
       (self.root_states[:, 2] - cfg.lift_gate_height_center) / cfg.lift_gate_height_width
@@ -159,6 +171,12 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.two_foot[:] = geo.two_foot_share_score(force_l, force_r, cfg.two_foot_full_share)
     # Both feet loaded AND flat: a foot propped on its edge or toe does not count.
     self.two_foot_flat[:] = self.two_foot * self.foot_flat.min(dim=1).values
+    # Short swings: a foot off the ground briefly to be re-placed.
+    unloaded = torch.stack((force_l, force_r), 1) < cfg.swing_unloaded_weight_fraction * weight_of(self)[:, None]
+    actuated = (self.real_episode_length_buf > self.unactuated_time)[:, None]
+    self.foot_air_time[:] = torch.where(unloaded & actuated, self.foot_air_time + self.dt, torch.zeros_like(self.foot_air_time))
+    credit = geo.swing_credit(self.foot_air_time, cfg.swing_free_s, cfg.swing_max_s) * unloaded
+    self.swing_exempt[:] = credit.max(dim=1).values * (~unloaded).any(dim=1)  # the other foot stands
     self.ready[:] = geo.rise_ready_score(
       self._reward_feet_under_com(),
       self.two_foot,
@@ -195,9 +213,10 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     rising = actuated & ~self.ever_stood & (h >= cfg.rise_gate_height_center)
     band = actuated & ~self.ever_stood & (h > cfg.improper_rise_height_m)
     two_min, com_max, _ = self.improper_rise_thresholds()
-    proper = (self.two_foot_flat >= two_min) & (
-      torch.nan_to_num(self.com_outside, nan=math.inf) <= com_max
-    )
+    com_ok = torch.nan_to_num(self.com_outside, nan=math.inf) <= com_max
+    # A short re-placing step on one flat loaded foot with the COM over it is proper too.
+    stepping = (self.swing_exempt > 0.5) & (self.foot_flat.max(dim=1).values > 0.5)
+    proper = ((self.two_foot_flat >= two_min) | stepping) & com_ok
     self.improper_steps[:] = torch.where(band & ~proper, self.improper_steps + 1.0, torch.zeros_like(h))
     weight = weight_of(self)
     fl, fr, _ = self._ground_support_forces()
@@ -286,10 +305,18 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
   def _reward_stance_width(self):
     cfg = self.cfg.staged
     left, right, _ = self._normalized_supports()
-    cost = geo.stance_width_cost(
-      self.foot_gap, self.stance_width, cfg.stance_min_gap_m, cfg.stance_max_width_m,
+    # Feet too close / crossing pays whenever a foot is loaded; a wide stance pays
+    # only once standing (rev 11), so the robot may rise wide and step in after.
+    no_width = torch.zeros_like(self.stance_width)
+    too_close = geo.stance_width_cost(
+      self.foot_gap, no_width, cfg.stance_min_gap_m, cfg.stance_max_width_m,
       cfg.stance_gap_scale_m, cfg.stance_width_scale_m, cfg.stance_cost_cap,
     )
+    too_wide = geo.stance_width_cost(
+      torch.full_like(self.foot_gap, math.inf), self.stance_width, cfg.stance_min_gap_m,
+      cfg.stance_max_width_m, cfg.stance_gap_scale_m, cfg.stance_width_scale_m, cfg.stance_cost_cap,
+    )
+    cost = (too_close + too_wide * self._standing_gate()).clamp(max=cfg.stance_cost_cap)
     # Gate on either foot: one foot resting on or crossing the other also pays.
     return cost * torch.maximum(left, right) * self.lift_gate
 
@@ -353,14 +380,26 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
   def _reward_one_foot_rise(self):
     left, right, _ = self._normalized_supports()
-    return geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot_flat, self.rise_gate)
+    cost = geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot_flat, self.rise_gate)
+    return cost * (1.0 - self.swing_exempt)
+
+  def _reward_loaded_foot_drag(self):
+    cfg = self.cfg.staged
+    left, right, _ = self._normalized_supports()
+    actuated = (self.real_episode_length_buf > self.unactuated_time).float()
+    weight = torch.stack((left, right), 1) * self.foot_flat * actuated[:, None]
+    return geo.foot_drag_cost(
+      self.foot_vel_xy, self.lateral, weight, cfg.foot_drag_deadband_m_s, cfg.foot_drag_scale_m_s,
+      cfg.foot_drag_lateral_gain, cfg.foot_drag_cost_cap,
+    )
 
   def _reward_standing_load_imbalance(self):
     left, right, _ = self._ground_support_forces()
     body_ids = self.robot.indexing.body_ids.long()
     weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
     cost = geo.load_imbalance_cost(left, right, weight, self.cfg.staged.load_imbalance_floor_weight_fraction)
-    return cost * self._standing_gate()
+    # A short step (other foot briefly lifted to be re-placed) is exempt.
+    return cost * self._standing_gate() * (1.0 - self.swing_exempt)
 
   def _reward_knee_load_support(self):
     cfg = self.cfg.staged
@@ -481,6 +520,9 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.ep_ready_before_rise[env_ids] = False
       self.ep_rise_steps[env_ids] = 0.0
       self.improper_steps[env_ids] = 0.0
+      self.foot_prev_valid[env_ids] = False
+      self.foot_air_time[env_ids] = 0.0
+      self.swing_exempt[env_ids] = 0.0
       self.ep_rise_two_foot_steps[env_ids] = 0.0
       self.ep_rise_one_foot_steps[env_ids] = 0.0
       self.prev_height[env_ids] = 0.0

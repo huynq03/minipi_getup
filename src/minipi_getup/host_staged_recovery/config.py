@@ -96,6 +96,19 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     torso_lift_vz_threshold_m_s = 0.02
     torso_lift_vz_scale_m_s = 0.10
     torso_lift_cost_cap = 9.0
+    # Loaded-foot drag (rev 11): horizontal speed of a loaded, flat sole above the
+    # deadband; sideways drag (closing the stance by sliding) counts double.
+    foot_drag_deadband_m_s = 0.02
+    foot_drag_scale_m_s = 0.05
+    foot_drag_lateral_gain = 2.0
+    foot_drag_cost_cap = 9.0
+    # Stepping (rev 11): a foot off the ground (< swing_unloaded_weight_fraction of
+    # the weight) for at most swing_free_s is a re-placing step, exempt from the
+    # one-foot rise, standing load-imbalance and improper-rise checks; the
+    # exemption fades out by swing_max_s.
+    swing_unloaded_weight_fraction = 0.05
+    swing_free_s = 0.2
+    swing_max_s = 0.4
     # One-foot rise penalty: active from this base height until standing.
     rise_gate_height_center = 0.10
     rise_gate_height_width = 0.02
@@ -147,6 +160,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       style_one_foot_rise = -20.0
       # Get up slowly: upward COM speed above 0.2 m/s.
       style_rise_speed = -15.0
+      # Do not drag loaded flat feet (sideways counts double); step instead.
+      style_loaded_foot_drag = -8.0
       # Feet first: raising the torso before both flat feet carry the load.
       style_torso_lift_without_feet = -10.0
       # Standing-gated only: straight or reversed knees are free while getting

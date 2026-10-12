@@ -145,6 +145,20 @@ class GeometryTests(unittest.TestCase):
     cost = geo.torso_lift_cost(vz, feet, gate, 0.02, 0.10, 9.0)
     self.assertTrue(torch.allclose(cost, torch.tensor([1.0, 0.0, 0.0, 0.0])))  # lift / still / on feet / gated
 
+  def test_foot_drag_weights_sideways_and_skips_unloaded_feet(self):
+    lateral = torch.tensor([[0.0, 1.0]])  # robot left = world +y
+    vel = torch.tensor([[[0.07, 0.0], [0.0, 0.07]]])  # left foot forward, right foot sideways
+    full = geo.foot_drag_cost(vel, lateral, torch.ones(1, 2), 0.02, 0.05, 2.0, 9.0)
+    self.assertAlmostEqual(full.item(), 1.0 + 2.0, places=4)
+    lifted = geo.foot_drag_cost(vel, lateral, torch.tensor([[1.0, 0.0]]), 0.02, 0.05, 2.0, 9.0)
+    self.assertAlmostEqual(lifted.item(), 1.0, places=4)  # the swinging foot is free
+    slow = geo.foot_drag_cost(vel * 0.2, lateral, torch.ones(1, 2), 0.02, 0.05, 2.0, 9.0)
+    self.assertEqual(slow.item(), 0.0)
+
+  def test_swing_credit(self):
+    credit = geo.swing_credit(torch.tensor([0.0, 0.2, 0.3, 0.4, 1.0]), 0.2, 0.4)
+    self.assertTrue(torch.allclose(credit, torch.tensor([1.0, 1.0, 0.5, 0.0, 0.0])))
+
   def test_one_foot_rise_cost(self):
     loaded = torch.tensor([1.0, 1.0, 0.0, 1.0])
     two_foot = torch.tensor([0.0, 1.0, 0.0, 0.0])
@@ -214,7 +228,8 @@ class ConfigTests(unittest.TestCase):
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
-                 "style_one_foot_rise", "style_rise_speed", "style_torso_lift_without_feet"):
+                 "style_one_foot_rise", "style_rise_speed", "style_torso_lift_without_feet",
+                 "style_loaded_foot_drag"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
