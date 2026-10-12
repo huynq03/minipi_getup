@@ -1,0 +1,142 @@
+"""Support-polygon geometry for staged recovery rewards and evaluation.
+
+All quantities are horizontal (world x/y) on the flat terrain plane z = 0.
+"""
+
+from __future__ import annotations
+
+import itertools
+
+import torch
+from mjlab.utils.lab_api.math import quat_apply
+
+# Ground-contact footprint of one sole in the ankle_roll_link frame. The five
+# sole capsules (radius 0.005 m, axis z = -0.043 m) run heel-to-toe; their lowest
+# lines span x in [-0.129, 0.026] and y within +-0.029 (toe) / +-0.0233 (heel).
+# Left and right soles share the same local geometry in the XML.
+SOLE_CORNERS_LOCAL = (
+  (0.026, 0.029, -0.048),
+  (0.026, -0.029, -0.048),
+  (-0.129, -0.0233, -0.048),
+  (-0.129, 0.0233, -0.048),
+)
+
+_PAIRS = tuple(itertools.combinations(range(8), 2))
+
+
+def sole_corners_world(foot_pos: torch.Tensor, foot_quat: torch.Tensor) -> torch.Tensor:
+  """(N, 2, 3) foot frames -> (N, 2, 4, 3) world sole corners."""
+  local = torch.tensor(SOLE_CORNERS_LOCAL, dtype=foot_pos.dtype, device=foot_pos.device)
+  n, feet = foot_pos.shape[:2]
+  quat = foot_quat[:, :, None].expand(n, feet, 4, 4).reshape(-1, 4)
+  offset = quat_apply(quat, local.expand(n, feet, 4, 3).reshape(-1, 3))
+  return foot_pos[:, :, None] + offset.reshape(n, feet, 4, 3)
+
+
+def support_polygon_distance(
+  point: torch.Tensor, vertices: torch.Tensor, valid: torch.Tensor, eps: float = 1e-9
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+  """Distance from a 2D point to the convex hull of the valid vertices.
+
+  point (N, 2); vertices (N, 8, 2); valid (N, 8). Returns (outside distance,
+  0 inside; distance to the valid-vertex centroid; any-valid mask). Hull edges
+  are the vertex pairs with every other valid vertex on one side, so a single
+  foot, two feet, or an edge contact (collinear vertices) are all handled.
+  Rows without valid vertices return +inf.
+  """
+  pairs = torch.tensor(_PAIRS, device=point.device)
+  a, b = vertices[:, pairs[:, 0]], vertices[:, pairs[:, 1]]  # (N, 28, 2)
+  edge = b - a
+  pair_valid = valid[:, pairs[:, 0]] & valid[:, pairs[:, 1]] & (edge.square().sum(-1) > eps)
+  rel = vertices[:, None] - a[:, :, None]  # (N, 28, 8, 2)
+  cross = edge[:, :, None, 0] * rel[..., 1] - edge[:, :, None, 1] * rel[..., 0]
+  others = valid[:, None, :].expand_as(cross)
+  nonneg = ((cross >= -eps) | ~others).all(-1)
+  nonpos = ((cross <= eps) | ~others).all(-1)
+  hull = pair_valid & (nonneg | nonpos)
+  side = torch.where(nonneg & ~nonpos, 1.0, torch.where(nonpos & ~nonneg, -1.0, 0.0))
+  rel_p = point[:, None] - a
+  cp = edge[..., 0] * rel_p[..., 1] - edge[..., 1] * rel_p[..., 0]
+  out_edge = hull & (
+    ((side > 0) & (cp < -eps)) | ((side < 0) & (cp > eps)) | ((side == 0) & (cp.abs() > eps))
+  )
+  inside = hull.any(-1) & ~out_edge.any(-1)
+  t = ((rel_p * edge).sum(-1) / edge.square().sum(-1).clamp_min(eps)).clamp(0.0, 1.0)
+  seg = torch.linalg.vector_norm(rel_p - t[..., None] * edge, dim=-1)
+  seg = torch.where(hull, seg, torch.inf).amin(-1)
+  pts = torch.linalg.vector_norm(point[:, None] - vertices, dim=-1)
+  pts = torch.where(valid, pts, torch.inf).amin(-1)
+  any_valid = valid.any(-1)
+  outside = torch.where(inside, torch.zeros_like(seg), torch.minimum(seg, pts))
+  weight = valid.float()
+  centroid = (vertices * weight[..., None]).sum(1) / weight.sum(1, keepdim=True).clamp_min(1.0)
+  centre = torch.linalg.vector_norm(point - centroid, dim=-1)
+  centre = torch.where(any_valid, centre, torch.inf)
+  return outside, centre, any_valid
+
+
+def com_support_score(outside, centre, any_valid, sigma_out, sigma_centre):
+  """1 for a COM centred over the support, 0.7 at its edge, ~0 well outside."""
+  score = torch.exp(-(outside / sigma_out).square()) * (
+    0.7 + 0.3 * torch.exp(-(centre / sigma_centre).square())
+  )
+  return torch.where(any_valid, score, torch.zeros_like(score))
+
+
+def foot_lateral_gap(corners: torch.Tensor, foot_quat: torch.Tensor) -> torch.Tensor:
+  """Clearance between the two sole footprints across the mean foot heading.
+
+  corners (N, 2, 4, 3) with index 0 = left foot. Positive when the left sole lies
+  entirely left of the right sole; <= 0 when the soles touch, overlap or cross.
+  Zero joints give about 0.10 m.
+  """
+  x_axis = torch.zeros(foot_quat.shape[:-1] + (3,), device=foot_quat.device, dtype=foot_quat.dtype)
+  x_axis[..., 0] = 1.0
+  heading = quat_apply(foot_quat.reshape(-1, 4), x_axis.reshape(-1, 3)).reshape(x_axis.shape)
+  heading = heading[..., :2].sum(1)
+  heading = heading / torch.linalg.vector_norm(heading, dim=-1, keepdim=True).clamp_min(1e-6)
+  lateral = torch.stack((-heading[:, 1], heading[:, 0]), dim=-1)  # left of heading
+  side = (corners[..., :2] * lateral[:, None, None]).sum(-1)  # (N, 2, 4)
+  return side[:, 0].amin(-1) - side[:, 1].amax(-1)
+
+
+def stance_width_cost(gap, width, min_gap, max_width, gap_scale, width_scale, cap):
+  """Zero for separated soles (gap >= min_gap) no wider than max_width (sole
+  centre distance); squared normalized violation outside."""
+  low = (torch.relu(min_gap - gap) / gap_scale).square()
+  high = (torch.relu(width - max_width) / width_scale).square()
+  return (low + high).clamp(max=cap)
+
+
+def adequate_stance(gap, width, min_gap, max_width):
+  return (gap >= min_gap) & (width <= max_width)
+
+
+def feet_under_com_score(foot_xy, com_xy, radius, scale):
+  """Per-foot exp(-(excess horizontal distance / scale)^2), averaged over feet."""
+  dist = torch.linalg.vector_norm(foot_xy - com_xy[:, None], dim=-1)
+  return torch.exp(-(torch.relu(dist - radius) / scale).square()).mean(-1)
+
+
+def unsupported_ascent_cost(com_vz, support_score, gate, threshold, scale):
+  """Upward COM speed above `threshold`, weighted by missing COM support."""
+  return (torch.relu(com_vz - threshold) / scale).square() * (1.0 - support_score) * gate
+
+
+def knee_reverse_lock_cost(calf, support, soft_rad, span_rad):
+  """Load-weighted squared entry into the reverse knee range (calf < -soft)."""
+  return ((torch.relu(-calf - soft_rad) / span_rad).square() * support).mean(-1)
+
+
+def knee_contact_ramp(knee_time, ramp_s, initial):
+  """Brief knee support costs `initial`; sustained support ramps to full cost."""
+  return initial + (1.0 - initial) * (knee_time / ramp_s).clamp(0.0, 1.0)
+
+
+def speed_limited_torque(torque, velocity, limit, max_speed, band):
+  """Linear motor torque-speed limit: torque that accelerates a joint in its
+  direction of motion fades from full at (max_speed - band) to zero at
+  max_speed. Braking torque is unaffected."""
+  available = limit * ((max_speed - velocity.abs()) / band).clamp(0.0, 1.0)
+  same_direction = torque * velocity > 0
+  return torch.where(same_direction, torch.maximum(torch.minimum(torque, available), -available), torque)

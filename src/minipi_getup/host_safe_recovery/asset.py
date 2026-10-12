@@ -43,20 +43,18 @@ REAL_TORQUE = {
 _HOST_FACTORY = host_env.get_robot_cfg
 
 
-def asset_sha256() -> str:
-  return hashlib.sha256(ASSET_XML.read_bytes()).hexdigest()
+def asset_sha256(xml: Path = ASSET_XML) -> str:
+  return hashlib.sha256(xml.read_bytes()).hexdigest()
 
 
-def configure_asset() -> Path:
+def configure_asset(xml: Path = ASSET_XML, expected: str = EXPECTED_ASSET_SHA256) -> Path:
   """Select the exact requested XML and add only non-physical HoST frames."""
-  if not ASSET_XML.is_file():
-    raise FileNotFoundError(ASSET_XML)
-  digest = asset_sha256()
-  if digest != EXPECTED_ASSET_SHA256:
-    raise RuntimeError(
-      f"Asset changed: expected {EXPECTED_ASSET_SHA256}, found {digest}: {ASSET_XML}"
-    )
-  host_env.ASSET_XML = ASSET_XML
+  if not xml.is_file():
+    raise FileNotFoundError(xml)
+  digest = asset_sha256(xml)
+  if digest != expected:
+    raise RuntimeError(f"Asset changed: expected {expected}, found {digest}: {xml}")
+  host_env.ASSET_XML = xml
 
   def factory(limit_solref=None):
     cfg = _HOST_FACTORY(limit_solref)
@@ -85,4 +83,4 @@ def configure_asset() -> Path:
     return cfg
 
   host_env.get_robot_cfg = factory
-  return ASSET_XML
+  return xml

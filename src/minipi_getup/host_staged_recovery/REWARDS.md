@@ -1,0 +1,116 @@
+# host_staged_recovery — reward definitions
+
+Variant of `host_safe_recovery` (HoST multi-critic PPO, unchanged) shaped toward the recovery sequence
+
+> legs in → feet down → COM over the support → extend and raise the torso → default posture
+
+as a soft preference, not a state machine. No reward gate is a hard switch, there is no time penalty, and
+no term targets a fixed knee or hip angle.
+
+## Conventions
+
+- HoST multiplies every constraint scale by the policy `dt = 0.02 s`. Groups are `task` (multiplicative),
+  `regu`, `style` and `target`, with group weights `[2.5, 0.1, 1, 1]`. Each group has its own critic and
+  advantages are normalized per group.
+- `W`: randomized robot weight (N). `L`, `R`: per-foot terrain normal load, 20 ms mean.
+  `sup(F) = 1 − exp(−relu(F − 0.02W) / 0.25W)` is the normalized support in [0, 1).
+- **COM**: the whole-body centre of mass, `data.subtree_com[root]`, in world frame. `v_z` is its finite
+  difference over one policy step.
+- **Sole footprint**: in the `ankle_roll_link` frame, the bottom lines of the 5 sole capsules span
+  x ∈ [−0.129, 0.026] m and half-width 0.029 m (toe) / 0.0233 m (heel), at z = −0.048 m.
+  - The 4 corners are transformed with the real foot pose.
+  - A corner counts as support if it lies within 1.2 cm of the ground **and** its foot has `sup > 0.15`.
+- **Support polygon**: the convex hull of the counted corners. It covers one foot, two feet, or a line
+  for an edge contact.
+  - `d_out`: distance from COM_xy to the hull (0 inside). `d_c`: distance from COM_xy to the centroid of
+    the counted corners.
+- `com_score = exp(−(d_out/0.03)²) · (0.7 + 0.3·exp(−(d_c/0.06)²))`, or 0 without support.
+- **Stance**:
+  - `width` is the horizontal distance between the sole centres (0.16 m at zero joints).
+  - `gap` is the lateral clearance between the two footprints, measured across the mean foot heading
+    (0.10 m at zero joints; ≤ 0 means touching or crossing).
+- **Gates**:
+  - `lift = σ((z_base − 0.14)/0.03)`: torso off the floor.
+  - `standing gate = σ((z_base − 0.25)/0.045)·σ((−g_z − 0.65)/0.12)`, the same as `host_safe_recovery`.
+
+## Removed relative to `host_safe_recovery`
+
+| Term | Was | Reason |
+|---|---|---|
+| `target_loaded_knee_flexion` | +4 | joint-specific strategy reward |
+| `target_knee_sole_progress` | +6 | knee-flexion reward |
+| `target_recovery_hip_roll` | 0 | hip-roll opening reward |
+| `style_loaded_hip_roll_excess` | −12 | joint-specific; the hip ROM was widened on purpose |
+| `style_loaded_knee_hyperextension` | −4 | replaced by `style_knee_reverse_lock` (also active while standing) |
+| `regu_joint_overspeed` | −0.30 | moved to `style_joint_overspeed` |
+
+## Pipeline terms (new or modified)
+
+| Stage | Term | Scale | Value per step | Active when |
+|---|---|---:|---|---|
+| 1 legs in | `target_feet_under_com` | +3 | mean over feet of `exp(−(relu(‖foot_xy − COM_xy‖ − 0.12)/0.08)²)` | always (also satisfied when standing) |
+| 2 feet down | `target_two_foot_flat_support` | +4 | `sup_L·flat_L · sup_R·flat_R`, with `flat = exp(−(tilt/0.15)²)` | always |
+| 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · min(sup_L, sup_R)` | both feet loaded |
+| 3 COM transfer | `target_com_support` | +6 | `com_score · max(sup_L, sup_R) · lift` | a foot loaded, torso up |
+| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
+| 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
+| 5 standing | `style_knee_reverse_lock` | −8 | mean over legs of `sup · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | leg loaded (any phase) |
+| knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
+| velocity | `style_joint_overspeed` | −1.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 4)²` × regu ramp (1/3 → 1) | after the success curriculum |
+
+Calf sign (verified by kinematics): calf > 0 flexes the knee (hip–ankle distance 0.276 → 0.183 m at
++1.65); calf < 0 bends it backwards toward the −0.65 stop.
+
+## Kept from `host_safe_recovery` and HoST (unchanged)
+
+- **task:** `head_height × orientation`, HoST tolerance functions, × the height credit above.
+- **target:**
+  - `foot_load_support` (+8), `sole_contact_coverage` (+4), `foot_supported_height` (+8).
+  - HoST post-task terms: `target_base_height`, `target_orientation`, `ang_vel_xy`, `lin_vel_xy`,
+    `feet_height_var`.
+  - `default_posture` (−8, standing gate, curriculum boost ≤ 2×), `stable_standing` (−0.05).
+- **style:**
+  - `loaded_sole_tilt` (−8), `loaded_sole_coverage_deficit` (−8, min coverage 0.9).
+  - `loaded_sole_slip` (−6, linear above 0.03 m/s).
+  - `nonfoot_support` (−15), `ballistic_ascent` (−80), `recovery_rotation` (−2).
+  - HoST `ground_parallel`, `feet_distance` (> 0.45 m), `foot_displacement`, and
+    `hip_roll_deviation` / `hip_yaw_deviation` / `knee_deviation`. These are the HoST originals:
+    thresholds of 1.4 rad on one leg or 0.9 rad on both.
+- **regu:** all HoST regularizers, including `dof_pos_limits` (soft limit 0.9 of the XML range).
+
+## Actuation, assets and curricula
+
+- **Motor torque–speed limit:** the PD torque that accelerates a joint in its direction of motion fades
+  linearly from the 16/6 Nm limit at 4.5 rad/s to 0 at 6 rad/s. Braking torque is unaffected.
+  - This roughly halves peak joint speed. It is **not** a hard cap: impacts and coupled motion can still
+    exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
+- **Asset:** `cl_pai_host_torso_host_legs_hip120.xml` (SHA256 `45c5882b…`).
+  - It is the baseline XML with hip roll widened outward to 2π/3; hip pitch stays −1.25…1.75 rad.
+  - Thigh collision is a 1 mm box, as in the baseline, so thigh–torso and thigh–thigh interference is
+    not modelled.
+- **Reset:** the same distribution as the baseline. Joints are uniform within absolute half-spans equal
+  to 25% of the baseline ROM, so the widened hip roll does not widen resets. Five classes: supine,
+  prone, left, right, intermediate.
+- **Pull force:** HoST/safe curriculum unchanged: 40 N on `base_link`, +Z, once the torso is upright
+  (`g_z < −0.8`), stepping 40 → 0 by 10 N on head-height progress. It is not gated on the COM.
+- **Unchanged:** the action-scale curriculum (1.0 → 0.25 by HoST, then down to 0.10 on success) and the
+  success-gated penalty curriculum.
+
+## Stage monitors (logged, never used as reward gates)
+
+Times are measured from the start of actuation:
+
+- `t_feet`: first time both feet carry sustained support > 0.3.
+- `t_com`: first time the COM is over an **adequate** support (both feet, `gap ≥ 0.04`,
+  `width ≤ 0.26`, `d_out ≤ 1 cm`, `com_score > 0.5`) with the torso up.
+- `t_rise`: the **last** upward crossing of base height 0.24 m with `−g_z > 0.5` before first standing.
+
+Logged per episode:
+
+- `stage_feet_before_rise`, `stage_com_before_rise` and `stage_supported_at_rise`. The last one says
+  whether the support was adequate at the rise onset itself.
+- `knee_contact_time_s`, `reverse_knee_standing_frac`, `com_support_error_m`, `final_stance_width_m`,
+  `final_foot_gap_m`, `actuated_peak_joint_vel` and `actuated_velocity_violation` (> 6 rad/s).
+
+`evaluate.py` computes the same events for any checkpoint, including the `host_safe_recovery` baseline,
+with no pull force, DR or observation noise and a fixed action scale.
