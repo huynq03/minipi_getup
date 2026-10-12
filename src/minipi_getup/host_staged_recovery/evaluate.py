@@ -26,13 +26,20 @@ from minipi_getup.host_staged_recovery.config import StagedRecoveryCfg
 STAGE = StagedRecoveryCfg.staged
 
 
-def build(variant: str, action_scale: float, episode_s: float, num_envs: int, device: str):
+def build(variant: str, action_scale: float, episode_s: float, num_envs: int, device: str,
+          asset: str = "native"):
+  """Returns (env, variant name, checkpoint asset hash to verify, PPO cfg, asset hash in use).
+
+  asset="staged" runs a host_safe_recovery policy on the staged asset (leg/torso
+  shells, 120-degree hip roll); the checkpoint is still verified against the asset
+  it was trained on."""
   if variant == "staged":
     from minipi_getup.host_staged_recovery import EXPERIMENT_NAME as name
     from minipi_getup.host_staged_recovery.asset import asset_sha256, configure_asset
     from minipi_getup.host_staged_recovery.config import StagedRecoveryPPOCfg as Ppo
     from minipi_getup.host_staged_recovery.env import StagedRecoveryEnv as Env
     cfg = StagedRecoveryCfg()
+    cfg.staged.velocity_termination = False  # measure speed; do not cut episodes
   else:
     from minipi_getup.host_safe_recovery import EXPERIMENT_NAME as name
     from minipi_getup.host_safe_recovery.asset import asset_sha256, configure_asset
@@ -40,7 +47,15 @@ def build(variant: str, action_scale: float, episode_s: float, num_envs: int, de
     from minipi_getup.host_safe_recovery.config import SafeRecoveryPPOCfg as Ppo
     from minipi_getup.host_safe_recovery.env import SafeRecoveryEnv as Env
     cfg = SafeRecoveryCfg()
-  configure_asset()
+  trained_sha = asset_sha256()
+  if asset == "staged" and variant == "safe":
+    from minipi_getup.host_safe_recovery.asset import configure_asset as configure_safe
+    from minipi_getup.host_staged_recovery import asset as staged_asset
+    configure_safe(staged_asset.ASSET_XML, staged_asset.EXPECTED_ASSET_SHA256)
+    used_sha = staged_asset.EXPECTED_ASSET_SHA256
+  else:
+    configure_asset()
+    used_sha = trained_sha
   cfg.noise.add_noise = False
   cfg.env.episode_length_s = episode_s
   cfg.control.action_scale = action_scale
@@ -50,7 +65,7 @@ def build(variant: str, action_scale: float, episode_s: float, num_envs: int, de
     if key.startswith("randomize_") or key == "delay":
       setattr(cfg.domain_rand, key, False)
   env = Env(cfg, num_envs, device)
-  return env, name, asset_sha256(), Ppo
+  return env, name, trained_sha, Ppo, used_sha
 
 
 def load_actor(checkpoint: Path, env, name: str, sha: str, ppo_cls, device: str) -> ActorCritic:
@@ -80,7 +95,7 @@ def rollout(args) -> dict:
   torch.manual_seed(args.seed)
   np.random.seed(args.seed)
   dev = args.device
-  env, name, sha, ppo = build(args.variant, args.action_scale, args.episode_s, args.num_envs, dev)
+  env, name, sha, ppo, used_sha = build(args.variant, args.action_scale, args.episode_s, args.num_envs, dev, args.asset)
   actor = load_actor(args.checkpoint, env, name, sha, ppo, dev)
   n = env.num_envs
   weight = env.sim.model.body_mass[:, env.robot.indexing.body_ids.long()].sum(1) * 9.81
@@ -239,7 +254,8 @@ def rollout(args) -> dict:
     }
 
   out = {
-    "checkpoint": str(args.checkpoint.resolve()), "variant": args.variant, "asset_sha256": sha,
+    "checkpoint": str(args.checkpoint.resolve()), "variant": args.variant,
+    "checkpoint_asset_sha256": sha, "asset_sha256_used": used_sha, "asset_override": used_sha != sha,
     "settings": {"num_envs": n, "episodes": args.episodes, "seed": args.seed, "dr": False,
                  "pull_force": False, "observation_noise": False, "action_scale": args.action_scale,
                  "episode_s": args.episode_s, "velocity_ceiling_rad_s": ceiling},
@@ -270,6 +286,8 @@ def main() -> None:
   p = argparse.ArgumentParser(description=__doc__)
   p.add_argument("--checkpoint", type=Path, required=True)
   p.add_argument("--variant", choices=("staged", "safe"), default="staged")
+  p.add_argument("--asset", choices=("native", "staged"), default="native",
+                 help="staged: run a safe-variant policy on the staged (shell) asset")
   p.add_argument("--num-envs", type=int, default=250)
   p.add_argument("--episodes", type=int, default=1)
   p.add_argument("--action-scale", type=float, default=0.25)

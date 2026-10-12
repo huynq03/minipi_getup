@@ -2,9 +2,11 @@
 
 Baseline XML with the hip-roll outward limit widened (pi/2 -> 2pi/3; hip pitch
 stays -1.25..1.75 rad) plus massless box shells fitted to the thigh, shin and foot
-mesh AABBs. The shells use bits l=2/4, r=4/2, so they collide only left-vs-right:
-no terrain, torso, or same-leg contact. Without them the baseline collision model
-let the two feet overlap by up to ~2 cm and the shins/thighs pass through each other.
+mesh AABBs, plus a torso shell copying the torso box. Bits: left 2/12, right 4/10,
+torso 8/6, so shells collide left-vs-right and leg-vs-torso only (no terrain or
+same-leg contact). Without them the baseline collision model let the two feet
+overlap by up to ~2 cm, the shins/thighs pass through each other, and a folded
+foot/shin pass into the torso.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ ASSET_XML = Path(
   "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
   "hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_legcoll.xml"
 )
-EXPECTED_ASSET_SHA256 = "eba62848d93dd88a50ee9ac43191b08baa8a67b483cef1be017f411da776f0c8"
+EXPECTED_ASSET_SHA256 = "fc502d957655561c158f1b2a5fc3a5ac393d1e68d260041dcfab7823337ae3e8"
 
 
 def asset_sha256() -> str:

@@ -121,12 +121,22 @@ class GeometryTests(unittest.TestCase):
     self.assertTrue(torch.allclose(out, torch.tensor([16.0, 8.0, 0.0, -16.0])))
 
 
+class TerminationTests(unittest.TestCase):
+  def test_velocity_termination_is_off_until_curriculum_then_tightens(self):
+    env = object.__new__(StagedRecoveryEnv)
+    env.cfg = StagedRecoveryCfg()
+    for strength, expected in ((0.0, math.inf), (1e-3, 20.0 - 14e-3), (0.5, 13.0), (1.0, 6.0)):
+      env._penalty_curriculum_strength = lambda s=strength: torch.tensor(s)
+      self.assertAlmostEqual(env.velocity_termination_limit().item(), expected, places=4)
+
+
 class ConfigTests(unittest.TestCase):
   def test_asset_is_pinned_hip120_with_left_right_shells(self):
     self.assertEqual(asset_sha256(), EXPECTED_ASSET_SHA256)
     text = ASSET_XML.read_text()
-    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="2" conaffinity="4"'), 3)
-    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="2"'), 3)
+    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="2" conaffinity="12"'), 3)
+    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="10"'), 3)
+    self.assertEqual(text.count('name="base_shell_collision" class="collision" type="box" contype="8" conaffinity="6"'), 1)
     self.assertEqual(text.count('range="-1.25 1.75"'), 2)
     self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 2.0943951023931953"', text)
 

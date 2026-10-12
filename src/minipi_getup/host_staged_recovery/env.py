@@ -85,6 +85,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.ep_com_err_steps = zeros()
     self.actuated_peak_vel = zeros()
     self.step_peak_qd = zeros(self.num_dof)
+    self.overspeed_out = torch.zeros(n, dtype=torch.bool, device=dev)
 
   # ------------------------------------------------------------------ geometry
   def _update_stage_state(self):
@@ -171,6 +172,26 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.ep_com_err += torch.where(err_mask, self.com_outside, torch.zeros_like(self.com_outside))
     self.ep_com_err_steps += err_mask.float()
 
+  def velocity_termination_limit(self) -> torch.Tensor:
+    """Actuated joint-speed termination limit: off (inf) until the success
+    curriculum starts, then start -> final rad/s. Self-regulating: terminations
+    lower success, which relaxes the curriculum and the limit."""
+    cfg = self.cfg.staged
+    s = self._penalty_curriculum_strength()
+    limit = cfg.velocity_termination_start_rad_s + s * (
+      cfg.velocity_termination_final_rad_s - cfg.velocity_termination_start_rad_s
+    )
+    return torch.where(s > 0, limit, torch.full_like(limit, math.inf))
+
+  def check_termination(self):
+    super().check_termination()
+    actuated = self.real_episode_length_buf > self.unactuated_time
+    peak = self.step_peak_qd.max(dim=1).values  # 5 ms substep peak of this step
+    self.overspeed_out = actuated & (peak > self.velocity_termination_limit())
+    if not self.cfg.staged.velocity_termination:
+      self.overspeed_out[:] = False
+    self.reset_buf |= self.overspeed_out
+
   def compute_reward(self):
     self._update_stage_state()
     super().compute_reward()
@@ -212,9 +233,9 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
   def _reward_knee_reverse_lock(self):
     cfg = self.cfg.staged
-    left, right, _ = self._normalized_supports()
-    # Loaded leg, or any leg while standing (an unloaded standing leg may not lock).
-    weight = torch.maximum(torch.stack((left, right), dim=1), self._standing_gate()[:, None])
+    # Reverse knees are free while getting up; once standing, both knees must
+    # come back out of the reverse range (loaded or not).
+    weight = self._standing_gate()[:, None].expand(-1, 2)
     return geo.knee_reverse_lock_cost(
       self.dof_pos[:, self.knee_contact_indices], weight,
       cfg.knee_reverse_soft_rad, cfg.knee_reverse_span_rad,
@@ -316,6 +337,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["stage_t_rise"] = mean_t(t_rise)
     s["knee_contact_time_s"] = self.ep_knee_time[env_ids].mean()
     s["leg_contact_time_s"] = self.ep_leg_contact_time[env_ids].mean()
+    s["term_overspeed"] = self.overspeed_out[env_ids].float().mean()
+    s["velocity_termination_limit"] = self.velocity_termination_limit().reshape(-1)[0]
     s["reverse_knee_standing_frac"] = (
       self.ep_reverse_standing[env_ids] / self.ep_standing_steps[env_ids].clamp_min(1.0)
     ).mean()

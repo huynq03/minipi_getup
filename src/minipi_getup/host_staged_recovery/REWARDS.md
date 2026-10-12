@@ -52,6 +52,8 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
   mesh AABBs of the thigh, shin and foot. They use bits l=2/4 and r=4/2, so they collide left-vs-right
   only (no terrain, torso or same-leg contact). Mass and inertia are unchanged;
 - adds `style_leg_contact` from a left-subtree vs right-subtree contact sensor;
+- restricts `style_knee_reverse_lock` to the standing gate and raises it to −16;
+- adds the training-only velocity termination (off, then 20 → 6 rad/s with the success curriculum);
 - measures `gap` across the torso's lateral axis instead of the mean foot heading.
 
 ## Removed relative to `host_safe_recovery`
@@ -76,7 +78,7 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 3 COM transfer | `target_com_support` | +6 | `com_score · max(sup_L, sup_R) · lift` | a foot loaded, torso up |
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
-| 5 standing | `style_knee_reverse_lock` | −8 | mean over legs of `max(sup, standing gate) · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | leg loaded (any phase), or any leg while standing |
+| 5 standing | `style_knee_reverse_lock` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | standing only: reverse knees are allowed while getting up but must come back once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
@@ -110,11 +112,22 @@ Calf sign (verified by kinematics): calf > 0 flexes the knee (hip–ankle distan
     exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
 - **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `eba62848…`).
   - It is the baseline XML with hip roll widened outward to 2π/3; hip pitch stays −1.25…1.75 rad.
-  - It adds the left/right leg shells described in revision 2.
-  - Thigh–torso interference is still not modelled: the thigh's own collision remains a 1 mm box.
+  - It adds the leg shells described in revision 2 plus a torso shell that copies the torso box.
+    Bits: left 2/12, right 4/10, torso 8/6, so the shells collide left-vs-right and leg-vs-torso
+    only.
+  - A 1872-pose ROM sweep found no false contact at zero joints or fully adducted legs. The thigh shell
+    never reaches the torso inside the ROM; feet and shins reach it only with the knee folded past
+    ~0.8 rad and the hip flexed.
 - **Reset:** the same distribution as the baseline. Joints are uniform within absolute half-spans equal
   to 25% of the baseline ROM, so the widened hip roll does not widen resets. Five classes: supine,
   prone, left, right, intermediate.
+- **Velocity termination (training only):** an episode ends when the 5 ms peak actuated |q̇| exceeds a
+  limit.
+  - The limit is off until the success curriculum starts (EMA 0.60), then tightens from 20 to 6 rad/s
+    with the same smoothstep (complete at EMA 0.85).
+  - A smoke test showed that a fixed 12 rad/s limit ends every early episode: random policies peak at
+    15–30 rad/s.
+  - Evaluation and playback disable it.
 - **Pull force:** HoST/safe curriculum unchanged: 40 N on `base_link`, +Z, once the torso is upright
   (`g_z < −0.8`), stepping 40 → 0 by 10 N on head-height progress. It is not gated on the COM.
 - **Unchanged:** the action-scale curriculum (1.0 → 0.25 by HoST, then down to 0.10 on success) and the
