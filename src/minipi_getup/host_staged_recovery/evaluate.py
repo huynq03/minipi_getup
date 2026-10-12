@@ -242,7 +242,8 @@ def rollout(args) -> dict:
       "com_error_at_rise_onset_m": _stats(cat["rise_com"][ok]),
       "rise_com_support_error_m": _stats(cat["com_err_rise"][m]),
       "final_posture_rms_rad": _stats(cat["final_pose_rms"][m & cat["success"]]),
-      "final_reverse_knee_frac": float((cat["final_calf_min"][m & cat["success"]] < -STAGE.knee_reverse_soft_rad).float().mean()),
+      "final_knee_extended_frac": float((cat["final_calf_min"][m & cat["success"]] < -STAGE.knee_extension_soft_rad).float().mean()),
+      "final_knee_reversed_frac": float((cat["final_calf_min"][m & cat["success"]] < STAGE.knee_straight_rad).float().mean()),
       "final_max_sole_tilt_deg": _stats(cat["final_tilt_deg"][m & cat["success"]]),
       "knee_contact_time_s": _stats(cat["knee_time"][m]),
       "leg_leg_contact_time_s": _stats(cat["leg_time"][m]),
@@ -309,7 +310,7 @@ def main() -> None:
     print(f"  {c:12s} n={v['episodes']:4d} success={v['success']:.3f} "
           f"width={v['final_stance_width_m']['p50']} gap={v['final_foot_gap_m']['p50']} "
           f"rise_width={v['stance_width_at_rise_onset_m']['p50']} supp@rise={v['supported_at_rise_onset']} com_err={v['final_com_support_error_m']['p50']} "
-          f"reverse_knee={v['final_reverse_knee_frac']:.2f} knee_s={v['knee_contact_time_s']['mean']}")
+          f"knee_extended={v['final_knee_extended_frac']:.2f} reversed={v['final_knee_reversed_frac']:.2f} knee_s={v['knee_contact_time_s']['mean']}")
 
 
 if __name__ == "__main__":

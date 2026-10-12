@@ -1,7 +1,8 @@
-"""Staged-recovery asset: CL_PAI/HoST hybrid, 120-degree hip roll, leg shells.
+"""Staged-recovery asset: CL_PAI/HoST hybrid, 120-degree hip roll, reversible knee, shells.
 
-Baseline XML with the hip-roll outward limit widened (pi/2 -> 2pi/3; hip pitch
-stays -1.25..1.75 rad) plus massless box shells fitted to the thigh, shin and foot
+Baseline XML with the hip-roll outward limit widened (pi/2 -> 2pi/3), the knee
+range widened from -0.65..1.65 (-0.65 = straight leg) to -1.65..1.65 so the knee
+can bend backwards up to 57 degrees (hip pitch stays -1.25..1.75 rad), plus massless box shells fitted to the thigh, shin and foot
 mesh AABBs, plus a torso shell copying the torso box. Bits: left 2/12, right 4/10,
 torso 8/6, so shells collide left-vs-right and leg-vs-torso only (no terrain or
 same-leg contact). Without them the baseline collision model let the two feet
@@ -21,7 +22,7 @@ ASSET_XML = Path(
   "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
   "hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_legcoll.xml"
 )
-EXPECTED_ASSET_SHA256 = "fc502d957655561c158f1b2a5fc3a5ac393d1e68d260041dcfab7823337ae3e8"
+EXPECTED_ASSET_SHA256 = "acb67647740c965e9bd9493c1b2b5d4f69abf16d25ac9d836d780aa04dcb1398"
 
 
 def asset_sha256() -> str:

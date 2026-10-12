@@ -41,7 +41,7 @@ At iteration 700, the first run stood on one foot: 94% of the load on the right 
 load, so an unloaded foot escaped all of them. Revision 2:
 
 - regates `style_stance_width` on `max(sup)·lift`;
-- regates `style_knee_reverse_lock` on `max(sup, standing gate)`;
+- regates the knee-extension cost (then named `style_knee_reverse_lock`) on `max(sup, standing gate)`;
 - adds `style_standing_load_imbalance`.
 
 Replaying those standing poses on the real meshes showed the two feet interpenetrating (median 5 mm,
@@ -52,7 +52,7 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
   mesh AABBs of the thigh, shin and foot. They use bits l=2/4 and r=4/2, so they collide left-vs-right
   only (no terrain, torso or same-leg contact). Mass and inertia are unchanged;
 - adds `style_leg_contact` from a left-subtree vs right-subtree contact sensor;
-- restricts `style_knee_reverse_lock` to the standing gate and raises it to −16;
+- restricts it to the standing gate, raises it to −16, and renames it `style_standing_knee_extension`;
 - adds the training-only velocity termination (off, then 20 → 6 rad/s with the success curriculum);
 - measures `gap` across the torso's lateral axis instead of the mean foot heading.
 
@@ -64,7 +64,7 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | `target_knee_sole_progress` | +6 | knee-flexion reward |
 | `target_recovery_hip_roll` | 0 | hip-roll opening reward |
 | `style_loaded_hip_roll_excess` | −12 | joint-specific; the hip ROM was widened on purpose |
-| `style_loaded_knee_hyperextension` | −4 | replaced by `style_knee_reverse_lock` (also active while standing) |
+| `style_loaded_knee_hyperextension` | −4 | replaced by `style_standing_knee_extension` |
 | `regu_joint_overspeed` | −0.30 | moved to `style_joint_overspeed` |
 | `style_hip_roll_deviation` (HoST) | −10 | HoST limit of 1.4 rad (one leg) / 0.9 rad (both) would cap the widened hip-roll ROM |
 
@@ -78,14 +78,25 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 3 COM transfer | `target_com_support` | +6 | `com_score · max(sup_L, sup_R) · lift` | a foot loaded, torso up |
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.4 + 0.6·com_score` | always; floor 0.4 keeps an early gradient |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − com_score) · lift` | after actuation starts |
-| 5 standing | `style_knee_reverse_lock` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²` (1.0 at the −0.65 stop) | standing only: reverse knees are allowed while getting up but must come back once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
+| 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 12.3 at the −1.65 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
 | velocity | `style_joint_overspeed` | −1.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 4)²` × regu ramp (1/3 → 1) | after the success curriculum |
 
-Calf sign (verified by kinematics): calf > 0 flexes the knee (hip–ankle distance 0.276 → 0.183 m at
-+1.65); calf < 0 bends it backwards toward the −0.65 stop.
+**Knee geometry** (angle between the hip→knee and knee→ankle joint axes):
+
+| calf (rad) | +1.65 | +1.00 | 0 (default) | −0.30 | −0.65 | −1.00 | −1.65 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| knee flexion | 132° | 95° | 37° | 20° | **0° (straight)** | −20° | −57° (reversed) |
+
+The baseline/HoST limit of −0.65 is exactly the straight leg, so earlier "reverse knee" notes in this
+project meant a straight knee locked on its stop. This asset widens the limit to −1.65, so reversed
+knees are possible in simulation.
+
+**Hardware caveat:** in MuJoCo nothing blocks the reversed range, because adjacent bodies do not
+collide and the convex hulls overlap at the knee anyway. Confirm that the real knee is not
+mechanically stopped at the straight position before deploying a policy that uses it.
 
 ## Kept from `host_safe_recovery` and HoST (unchanged)
 
@@ -110,8 +121,9 @@ Calf sign (verified by kinematics): calf > 0 flexes the knee (hip–ankle distan
   linearly from the 16/6 Nm limit at 4.5 rad/s to 0 at 6 rad/s. Braking torque is unaffected.
   - This roughly halves peak joint speed. It is **not** a hard cap: impacts and coupled motion can still
     exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
-- **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `eba62848…`).
-  - It is the baseline XML with hip roll widened outward to 2π/3; hip pitch stays −1.25…1.75 rad.
+- **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `acb67647…`).
+  - It is the baseline XML with hip roll widened outward to 2π/3 and the knee range widened to −1.65…1.65
+    (reversible past straight); hip pitch stays −1.25…1.75 rad.
   - It adds the leg shells described in revision 2 plus a torso shell that copies the torso box.
     Bits: left 2/12, right 4/10, torso 8/6, so the shells collide left-vs-right and leg-vs-torso
     only.
@@ -146,7 +158,7 @@ Logged per episode:
 
 - `stage_feet_before_rise`, `stage_com_before_rise` and `stage_supported_at_rise`. The last one says
   whether the support was adequate at the rise onset itself.
-- `knee_contact_time_s`, `reverse_knee_standing_frac`, `com_support_error_m`, `final_stance_width_m`,
+- `knee_contact_time_s`, `knee_extended_standing_frac`, `knee_reversed_standing_frac`, `com_support_error_m`, `final_stance_width_m`,
   `final_foot_gap_m`, `actuated_peak_joint_vel` and `actuated_velocity_violation` (> 6 rad/s).
 
 `evaluate.py` computes the same events for any checkpoint, including the `host_safe_recovery` baseline,

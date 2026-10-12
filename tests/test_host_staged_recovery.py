@@ -98,10 +98,10 @@ class GeometryTests(unittest.TestCase):
     cost = geo.unsupported_ascent_cost(vz, torch.tensor([0.0, 1.0, 0.0]), torch.ones(3), 0.05, 0.2)
     self.assertTrue(torch.allclose(cost, torch.tensor([1.0, 0.0, 0.0])))
 
-  def test_reverse_knee_and_knee_ramp(self):
+  def test_knee_extension_and_knee_ramp(self):
     calf = torch.tensor([[-0.65, -0.65], [0.5, 0.5], [-0.65, -0.65]])
     support = torch.tensor([[1.0, 1.0], [1.0, 1.0], [0.0, 0.0]])
-    cost = geo.knee_reverse_lock_cost(calf, support, 0.25, 0.40)
+    cost = geo.knee_extension_cost(calf, support, 0.25, 0.40)
     self.assertTrue(torch.allclose(cost, torch.tensor([1.0, 0.0, 0.0])))
     ramp = geo.knee_contact_ramp(torch.tensor([0.0, 0.4, 2.0]), 0.8, 0.25)
     self.assertTrue(torch.allclose(ramp, torch.tensor([0.25, 0.625, 1.0])))
@@ -138,6 +138,7 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="10"'), 3)
     self.assertEqual(text.count('name="base_shell_collision" class="collision" type="box" contype="8" conaffinity="6"'), 1)
     self.assertEqual(text.count('range="-1.25 1.75"'), 2)
+    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-1.65 1.65"'), 2)
     self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 2.0943951023931953"', text)
 
   def test_no_joint_strategy_rewards_and_pipeline_terms_registered(self):
@@ -147,7 +148,7 @@ class ConfigTests(unittest.TestCase):
                  "style_hip_roll_deviation"):
       self.assertEqual(getattr(s, name), 0.0, name)
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
-                 "style_stance_width", "style_unsupported_ascent", "style_knee_reverse_lock",
+                 "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))

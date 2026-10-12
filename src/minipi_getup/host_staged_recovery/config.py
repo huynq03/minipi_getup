@@ -55,13 +55,17 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     unsupported_ascent_threshold_m_s = 0.05
     unsupported_ascent_scale_m_s = 0.20
     # Reverse knee: calf < 0 bends the knee backwards toward the -0.65 stop.
-    knee_reverse_soft_rad = 0.25
+    # Knee geometry: calf 0 = 37 deg flexed (default), -0.65 = straight leg,
+    # below -0.65 = bent backwards (asset limit -1.65). Standing penalizes calf
+    # below -0.25 (< ~22 deg flexion), 1.0 at straight, growing when reversed.
+    knee_extension_soft_rad = 0.25
+    knee_straight_rad = -0.65
     # Actuated |qd| termination (5 ms peak): off until the success curriculum
     # starts (EMA 0.60), then 20 -> 6 rad/s as it completes (EMA 0.85).
     velocity_termination = True  # training only; evaluation/playback disable it
     velocity_termination_start_rad_s = 20.0
     velocity_termination_final_rad_s = 6.0
-    knee_reverse_span_rad = 0.40
+    knee_extension_span_rad = 0.40
     # Knee support: brief use is cheap, sustained use costs the full penalty.
     knee_contact_support_min = 0.10
     knee_contact_ramp_s = 0.8
@@ -92,8 +96,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       target_com_support = 6.0
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
-      # Standing-gated only: reverse knees allowed while getting up.
-      style_knee_reverse_lock = -16.0
+      # Standing-gated only: straight or reversed knees are free while getting
+      # up but must return toward the flexed default once standing.
+      style_standing_knee_extension = -16.0
       # Standing on one foot (the other resting on it) escaped every per-foot
       # load-weighted cost; this makes the load split itself costly.
       style_standing_load_imbalance = -6.0

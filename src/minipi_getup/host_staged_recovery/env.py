@@ -79,7 +79,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.t_rise = torch.full((n,), -1.0, device=dev)
     self.rise_supported = torch.zeros(n, dtype=torch.bool, device=dev)
     self.ep_knee_time = zeros()
-    self.ep_reverse_standing = zeros()
+    self.ep_knee_extended_standing = zeros()
+    self.ep_knee_reversed_standing = zeros()
     self.ep_standing_steps = zeros()
     self.ep_com_err = zeros()
     self.ep_com_err_steps = zeros()
@@ -167,7 +168,8 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     share = torch.minimum(force_l, force_r) / (force_l + force_r).clamp_min(1.0)
     self.ep_min_foot_share += share * standing
     calf = self.dof_pos[:, self.knee_contact_indices]
-    self.ep_reverse_standing += (standing & (calf < -cfg.knee_reverse_soft_rad).any(1)).float()
+    self.ep_knee_extended_standing += (standing & (calf < -cfg.knee_extension_soft_rad).any(1)).float()
+    self.ep_knee_reversed_standing += (standing & (calf < cfg.knee_straight_rad).any(1)).float()
     err_mask = actuated & (self.lift_gate > 0.5) & torch.isfinite(self.com_outside)
     self.ep_com_err += torch.where(err_mask, self.com_outside, torch.zeros_like(self.com_outside))
     self.ep_com_err_steps += err_mask.float()
@@ -231,14 +233,14 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       cfg.unsupported_ascent_threshold_m_s, cfg.unsupported_ascent_scale_m_s,
     )
 
-  def _reward_knee_reverse_lock(self):
+  def _reward_standing_knee_extension(self):
     cfg = self.cfg.staged
-    # Reverse knees are free while getting up; once standing, both knees must
-    # come back out of the reverse range (loaded or not).
+    # Straight or reversed knees are free while getting up; once standing, both
+    # knees must return toward the flexed default (loaded or not).
     weight = self._standing_gate()[:, None].expand(-1, 2)
-    return geo.knee_reverse_lock_cost(
+    return geo.knee_extension_cost(
       self.dof_pos[:, self.knee_contact_indices], weight,
-      cfg.knee_reverse_soft_rad, cfg.knee_reverse_span_rad,
+      cfg.knee_extension_soft_rad, cfg.knee_extension_span_rad,
     )
 
   def _reward_leg_contact(self):
@@ -339,9 +341,9 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["leg_contact_time_s"] = self.ep_leg_contact_time[env_ids].mean()
     s["term_overspeed"] = self.overspeed_out[env_ids].float().mean()
     s["velocity_termination_limit"] = self.velocity_termination_limit().reshape(-1)[0]
-    s["reverse_knee_standing_frac"] = (
-      self.ep_reverse_standing[env_ids] / self.ep_standing_steps[env_ids].clamp_min(1.0)
-    ).mean()
+    steps = self.ep_standing_steps[env_ids].clamp_min(1.0)
+    s["knee_extended_standing_frac"] = (self.ep_knee_extended_standing[env_ids] / steps).mean()
+    s["knee_reversed_standing_frac"] = (self.ep_knee_reversed_standing[env_ids] / steps).mean()
     s["standing_min_foot_share"] = (
       self.ep_min_foot_share[env_ids] / self.ep_standing_steps[env_ids].clamp_min(1.0)
     ).mean()
@@ -365,6 +367,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.rise_supported[env_ids] = False
       self.prev_height[env_ids] = 0.0
       self.leg_contact_sensor.reset(env_ids)
-      for buf in (self.ep_knee_time, self.ep_leg_contact_time, self.ep_min_foot_share, self.ep_reverse_standing, self.ep_standing_steps,
+      for buf in (self.ep_knee_time, self.ep_leg_contact_time, self.ep_min_foot_share, self.ep_knee_extended_standing,
+                  self.ep_knee_reversed_standing, self.ep_standing_steps,
                   self.ep_com_err, self.ep_com_err_steps, self.actuated_peak_vel):
         buf[env_ids] = 0.0
