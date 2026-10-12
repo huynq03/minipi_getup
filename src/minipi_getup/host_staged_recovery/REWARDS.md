@@ -311,3 +311,20 @@ stance-width cost pulled the feet together during the rise.
   Anti-tapping: the swing timer restarts only after the foot has carried ≥ 15% of the weight for 0.25 s
   (brief taps freeze it), and at most 1 s of exemption is granted per episode (`swing_exempt_time_s`).
 
+## Revision 12: show the policy the narrow flat-footed squat
+
+The narrow squat (both soles flat under the hips, COM between them) is kinematically possible from a base
+height of 0.206 m (hip pitch −1.25 and ankle pitch −0.5 at their limits; lower is impossible with the soles
+under the hips), but from a fallen start the policy never reached it: splaying one leg was easier to find.
+
+- **Squat starts** (training only): 15% of resets start in a library pose (`squat_poses.py`, damped
+  Gauss-Newton IK: soles flat at the default standing positions, COM over the sole midpoint, no
+  self-collision; calf 0.9–1.6 → base 0.206–0.280 m, 14 poses), random yaw, ±0.03 rad joint noise,
+  actuated from the first step and without the pull force (the env's force is restored at its next
+  reset). Excluded from the penalty-curriculum EMA (`_penalty_ema_ids`) and from all stage/rise metrics;
+  logged as `squat_start_frac`, `squat_start_success`; fallen-start success as `fallen_success`.
+  Evaluation and playback use no squat starts.
+- **`target_narrow_squat_support` (+6):** `share₂·min(flat) · mean_feet exp(−((d_out − 0.057)/0.03)²) ·
+  com_score · rise_gate`, a positive guide toward the same posture while rising.
+- Together with rev 11b's foot-splay and foot-drag costs.
+

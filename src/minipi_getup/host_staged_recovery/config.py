@@ -120,6 +120,17 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     foot_splay_free_m = 0.10
     foot_splay_scale_m = 0.04
     foot_splay_cost_cap = 9.0
+    # Squat starts (rev 12, training only): this fraction of resets starts in a
+    # narrow flat-footed squat (soles under the hips, COM between the feet, knees
+    # bent calf in squat_start_calf_range: base 0.21-0.28 m), actuated at once and
+    # without the pull force. Excluded from the curriculum EMA and stage metrics.
+    squat_start_prob = 0.15
+    squat_start_calf_range = (0.9, 1.6)
+    squat_start_joint_noise_rad = 0.03
+    # Narrow-squat guide while rising: soles under the hips (outward offset near
+    # the default 0.057 m), both flat and loaded, COM over the support.
+    narrow_squat_offset_m = 0.057
+    narrow_squat_sigma_m = 0.03
     # One-foot rise penalty: active from this base height until standing.
     rise_gate_height_center = 0.10
     rise_gate_height_width = 0.02
@@ -175,6 +186,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       style_loaded_foot_drag = -8.0
       # Plant the soles under the hips (bend the knees) instead of splaying a leg out.
       style_loaded_foot_splay = -6.0
+      # Positive guide toward the narrow flat-footed squat while rising (rev 12).
+      target_narrow_squat_support = 6.0
       # Feet first: raising the torso before both flat feet carry the load.
       style_torso_lift_without_feet = -10.0
       # Standing-gated only: straight or reversed knees are free while getting

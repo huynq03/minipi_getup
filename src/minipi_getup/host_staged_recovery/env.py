@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import torch
 from mjlab.sensor import ContactMatch, ContactSensor, ContactSensorCfg
 
@@ -14,6 +15,8 @@ from minipi_getup.host_safe_recovery.env import (
   _sole_tilt_cost,
 )
 from minipi_getup.host_staged_recovery import geometry as geo
+from minipi_getup.host_staged_recovery.asset import ASSET_XML
+from minipi_getup.host_staged_recovery.squat_poses import build_squat_library
 
 LEG_CONTACT_SENSOR = "staged_leg_leg_contact"
 
@@ -103,6 +106,13 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.foot_down_time = zeros(2)
     self.ep_swing_exempt_time = zeros()
     self.foot_offset = zeros(2)
+    self.squat_start = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.saved_force = self.force.clone()
+    lib = build_squat_library(
+      str(ASSET_XML), list(self.dof_names),
+      calves=np.linspace(*self.cfg.staged.squat_start_calf_range, 15),
+    )
+    self.squat_lib = {k: torch.tensor(v, dtype=torch.float, device=dev) for k, v in lib.items()}
     self.swing_exempt = zeros()
     self.lateral = zeros(2)
     self.prev_base_h = zeros()
@@ -392,6 +402,12 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     cost = geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot_flat, self.rise_gate)
     return cost * (1.0 - self.swing_exempt)
 
+  def _reward_narrow_squat_support(self):
+    # While rising: both flat soles loaded right under the hips, COM over them.
+    cfg = self.cfg.staged
+    under = torch.exp(-((self.foot_offset - cfg.narrow_squat_offset_m) / cfg.narrow_squat_sigma_m).square()).mean(-1)
+    return self.two_foot_flat * under * self.com_score * self.rise_gate
+
   def _reward_loaded_foot_splay(self):
     cfg = self.cfg.staged
     left, right, _ = self._normalized_supports()
@@ -462,6 +478,42 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.actuated_peak_vel = torch.maximum(self.actuated_peak_vel, peak)
 
   # ------------------------------------------------------------------ resets
+  def _penalty_ema_ids(self, env_ids):
+    # Squat starts stand up easily; they must not advance the curriculum.
+    return env_ids[~self.squat_start[env_ids]]
+
+  def _reset_root_states(self, env_ids):
+    super()._reset_root_states(env_ids)
+    cfg = self.cfg.staged
+    pick = torch.rand(len(env_ids), device=self.device) < cfg.squat_start_prob
+    self.squat_start[env_ids] = pick
+    ids = env_ids[pick]
+    n = len(ids)
+    if not n:
+      return
+    lib = self.squat_lib
+    k = torch.randint(0, len(lib["base_z"]), (n,), device=self.device)
+    lower = self.robot.data.joint_pos_limits[0, :, 0]
+    upper = self.robot.data.joint_pos_limits[0, :, 1]
+    q = lib["dof_pos"][k] + torch_rand_float(-1.0, 1.0, (n, self.num_dof), self.device) * cfg.squat_start_joint_noise_rad
+    self.dof_pos[ids] = torch.maximum(torch.minimum(q, upper - 0.01), lower + 0.01)
+    self.dof_vel[ids] = 0.0
+    self.robot.write_joint_state_to_sim(self.dof_pos[ids], self.dof_vel[ids], env_ids=ids)
+    pitch = lib["base_pitch"][k]
+    yaw = torch_rand_float(-math.pi, math.pi, (n,), self.device).squeeze(-1)
+    # q = yaw(z) * pitch(y), wxyz
+    cy, sy, cp, sp = torch.cos(yaw / 2), torch.sin(yaw / 2), torch.cos(pitch / 2), torch.sin(pitch / 2)
+    quat = torch.stack((cy * cp, -sy * sp, cy * sp, sy * cp), -1)
+    # Library base x is relative to the feet; rotate it with the yaw.
+    bx = lib["base_x"][k]
+    self.root_states[ids, 0] = self.env_origins[ids, 0] + bx * torch.cos(yaw)
+    self.root_states[ids, 1] = self.env_origins[ids, 1] + bx * torch.sin(yaw)
+    self.root_states[ids, 2] = lib["base_z"][k] + 0.002
+    self.root_states[ids, 3:7] = quat
+    self.root_states[ids, 7:13] = 0.0
+    self.base_quat[ids] = quat
+    self.robot.write_root_state_to_sim(self.root_states[ids], env_ids=ids)
+
   def _reset_dofs(self, env_ids):
     """Baseline reset distribution with absolute half-spans (ROM-independent)."""
     n = len(env_ids)
@@ -480,11 +532,21 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
   def _log_reset_metrics(self, env_ids):
     # The HoST monitor clears ever_stood inside its own logging.
-    stood = self.ever_stood[env_ids].clone()
+    stood_all = self.ever_stood[env_ids].clone()
+    success_all = (self.ever_stood[env_ids] & ~self.fell_after_stand[env_ids]).clone()
     super()._log_reset_metrics(env_ids)
     if not len(env_ids):
       return
     s = self.reset_stats
+    squat = self.squat_start[env_ids]
+    s["squat_start_frac"] = squat.float().mean()
+    s["squat_start_success"] = success_all[squat].float().mean() if squat.any() else torch.tensor(math.nan)
+    s["fallen_success"] = success_all[~squat].float().mean() if (~squat).any() else torch.tensor(math.nan)
+    # Stage and rise metrics below describe fallen starts only.
+    stood = stood_all[~squat]
+    env_ids = env_ids[~squat]
+    if not len(env_ids):
+      return
     t_feet, t_com, t_rise = self.t_feet[env_ids], self.t_com[env_ids], self.t_rise[env_ids]
 
     def frac(mask):
@@ -527,8 +589,17 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     ).float().mean()
 
   def reset_idx(self, env_ids):
+    if len(env_ids):
+      # Give the pull-force curriculum back to envs leaving a squat start.
+      was = env_ids[self.squat_start[env_ids]]
+      self.force[was] = self.saved_force[was]
     super().reset_idx(env_ids)
     if len(env_ids):
+      # Squat starts: actuated at once (no passive fall) and no pull force.
+      new = env_ids[self.squat_start[env_ids]]
+      self.real_episode_length_buf[new] = int(self.unactuated_time) + 1
+      self.saved_force[new] = self.force[new]
+      self.force[new] = 0.0
       self.com_prev_valid[env_ids] = False
       self.knee_time[env_ids] = 0
       for buf in (self.t_feet, self.t_com, self.t_rise):

@@ -682,10 +682,15 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
       speed > self.cfg.safe_recovery.overspeed_soft_rad_s
     )
 
+  def _penalty_ema_ids(self, env_ids):
+    """Episodes that count toward the penalty-curriculum success EMA."""
+    return env_ids
+
   def _log_reset_metrics(self, env_ids):
-    if len(env_ids):
-      success = (self.penalty_stood_on_feet[env_ids] & ~self.fell_after_stand[env_ids]).float().mean()
-      alpha = -math.expm1(-len(env_ids) / self.cfg.safe_recovery.penalty_success_ema_episodes)
+    ema_ids = self._penalty_ema_ids(env_ids)
+    if len(ema_ids):
+      success = (self.penalty_stood_on_feet[ema_ids] & ~self.fell_after_stand[ema_ids]).float().mean()
+      alpha = -math.expm1(-len(ema_ids) / self.cfg.safe_recovery.penalty_success_ema_episodes)
       self.penalty_success_ema += alpha * (success - self.penalty_success_ema)
     super()._log_reset_metrics(env_ids)
     self.reset_stats["penalty_foot_success_ema"] = self.penalty_success_ema.clone()

@@ -213,6 +213,29 @@ class TerminationTests(unittest.TestCase):
     self.assertFalse(env.improper_rise_out().any())
 
 
+class SquatStartTests(unittest.TestCase):
+  def test_squat_library_poses_are_narrow_flat_footed_and_collision_free(self):
+    import mujoco
+    import numpy as np
+    from minipi_getup.host_staged_recovery.squat_poses import build_squat_library
+    m = mujoco.MjModel.from_xml_path(str(ASSET_XML))
+    names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, j) for j in range(m.njnt)
+             if m.jnt_type[j] == mujoco.mjtJoint.mjJNT_HINGE]
+    lib = build_squat_library(str(ASSET_XML), names, calves=np.linspace(0.9, 1.6, 8))
+    self.assertGreaterEqual(len(lib["base_z"]), 6)
+    self.assertTrue(((lib["base_z"] > 0.19) & (lib["base_z"] < 0.29)).all())
+    for i, n in enumerate(names):
+      lo, hi = m.jnt_range[m.joint(n).id]
+      self.assertTrue(((lib["dof_pos"][:, i] >= lo - 1e-6) & (lib["dof_pos"][:, i] <= hi + 1e-6)).all(), n)
+
+  def test_squat_starts_do_not_feed_the_curriculum(self):
+    env = object.__new__(StagedRecoveryEnv)
+    env.squat_start = torch.tensor([True, False, True, False])
+    ids = torch.arange(4)
+    self.assertEqual(env._penalty_ema_ids(ids).tolist(), [1, 3])
+    self.assertEqual(StagedRecoveryCfg.staged.squat_start_prob, 0.15)
+
+
 class ConfigTests(unittest.TestCase):
   def test_asset_is_pinned_hip120_with_left_right_shells(self):
     self.assertEqual(asset_sha256(), EXPECTED_ASSET_SHA256)
@@ -240,7 +263,7 @@ class ConfigTests(unittest.TestCase):
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
                  "style_one_foot_rise", "style_rise_speed", "style_torso_lift_without_feet",
-                 "style_loaded_foot_drag", "style_loaded_foot_splay"):
+                 "style_loaded_foot_drag", "style_loaded_foot_splay", "target_narrow_squat_support"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)

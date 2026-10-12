@@ -41,6 +41,7 @@ def build(variant: str, action_scale: float, episode_s: float, num_envs: int, de
     cfg = StagedRecoveryCfg()
     cfg.staged.velocity_termination = False  # measure speed; do not cut episodes
     cfg.staged.improper_rise_termination = False
+    cfg.staged.squat_start_prob = 0.0
   else:
     from minipi_getup.host_safe_recovery import EXPERIMENT_NAME as name
     from minipi_getup.host_safe_recovery.asset import asset_sha256, configure_asset

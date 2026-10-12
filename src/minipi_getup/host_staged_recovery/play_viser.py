@@ -14,6 +14,7 @@ def make_cfg(dr, scale, episode):
   cfg.env.test = True
   cfg.staged.velocity_termination = False
   cfg.staged.improper_rise_termination = False
+  cfg.staged.squat_start_prob = 0.0
   if not dr:
     for key in dir(cfg.domain_rand):
       if key.startswith("randomize_") or key == "delay":
