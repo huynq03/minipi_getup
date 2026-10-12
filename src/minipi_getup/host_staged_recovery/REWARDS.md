@@ -76,7 +76,8 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 2 feet down | `target_two_foot_flat_support` | +4 | `share₂ · max(sup_L, sup_R) · flat_L · flat_R`, with `share₂ = clip(min(F_L,F_R)/(F_L+F_R) / 0.3)` and `flat = exp(−(tilt/0.15)²)` | always; one-foot standing (4% share) earns ~0.13 |
 | 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · max(sup_L, sup_R) · lift` | either foot loaded, torso up; a foot resting on or crossing the other also pays |
 | 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · lift` | both feet loaded, torso up |
-| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.15 + 0.85·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.15 keeps an early gradient |
+| 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.05 + 0.95·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.05 keeps an early gradient |
+| 4 rise | `style_one_foot_rise` | −12 | `max(sup_L, sup_R) · (1 − share₂) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − ready) · lift` | after actuation starts |
 | 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 31.6 at the −2.5 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
@@ -189,4 +190,18 @@ saturating supports that are already near 1 at a few percent of the weight.
 - Height credit `0.15 + 0.85·ready` (floor 0.4 → 0.15); unsupported ascent uses `1 − ready`.
 - `target_com_support` and `target_two_foot_flat_support` use the load share `share₂`.
 - Monitor `stage_ready_before_stand`: fraction of stood episodes with `ready > 0.5` before first standing.
+
+## Revision 5: getting up must use both feet in every orientation
+
+`model_900` of the rev-4 run stood on both feet (weaker foot 42–44%) but rose on one: between base height
+0.10 m and standing, both feet carried ≥10% of the weight in only 18–36% of the steps, one foot in 33–47%
+(mostly the left, the other foot ~5–10 cm up), in all five orientations. From supine it sat up, splayed the
+left leg out (hip roll ~1.6) and pistol-squatted while the right knee reversed with the foot in the air;
+the right foot landed only at ~0.26 m. Rising is ~0.3 s of a 10 s episode, so the 15% height-credit floor
+and the unsupported-ascent cost were cheaper than a slower two-foot rise.
+
+- `style_one_foot_rise` (−12): one-foot load while rising, from a base height of 0.10 m until standing.
+- Height-credit floor 0.15 → 0.05.
+- Monitors `rise_two_foot_frac` / `rise_one_foot_frac`: share of rising steps (h ≥ 0.10, before first
+  standing) with both / exactly one foot above 10% of the weight.
 

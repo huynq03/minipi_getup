@@ -129,6 +129,13 @@ class GeometryTests(unittest.TestCase):
     self.assertEqual(ready[2].item(), 0.0)
     self.assertEqual(ready[3].item(), 0.0)  # COM outside the support
 
+  def test_one_foot_rise_cost(self):
+    loaded = torch.tensor([1.0, 1.0, 0.0, 1.0])
+    two_foot = torch.tensor([0.0, 1.0, 0.0, 0.0])
+    gate = torch.tensor([1.0, 1.0, 1.0, 0.0])
+    cost = geo.one_foot_rise_cost(loaded, two_foot, gate)
+    self.assertTrue(torch.equal(cost, torch.tensor([1.0, 0.0, 0.0, 0.0])))  # one foot / both / knees / not rising
+
   def test_speed_limit_fades_accelerating_torque_only(self):
     torque = torch.tensor([16.0, 16.0, 16.0, -16.0])
     vel = torch.tensor([2.0, 5.25, 7.0, 7.0])
@@ -170,7 +177,8 @@ class ConfigTests(unittest.TestCase):
       self.assertEqual(getattr(s, name), 0.0, name)
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
-                 "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact"):
+                 "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
+                 "style_one_foot_rise"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)

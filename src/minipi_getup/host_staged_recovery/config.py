@@ -53,8 +53,11 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # Rising credit keeps this fraction until the robot is "ready": feet under
     # the COM, both feet flat on the ground (weaker foot >= two_foot_full_share
     # of the load) and the COM over the support polygon.
-    height_credit_com_floor = 0.15
+    height_credit_com_floor = 0.05
     two_foot_full_share = 0.3
+    # One-foot rise penalty: active from this base height until standing.
+    rise_gate_height_center = 0.10
+    rise_gate_height_width = 0.02
     unsupported_ascent_threshold_m_s = 0.05
     unsupported_ascent_scale_m_s = 0.20
     # Reverse knee: calf < 0 bends the knee backwards toward the -0.65 stop.
@@ -99,6 +102,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       target_com_support = 6.0
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
+      # Getting up must use both feet: any rising step with the load on one foot pays.
+      style_one_foot_rise = -12.0
       # Standing-gated only: straight or reversed knees are free while getting
       # up but must return toward the flexed default once standing.
       style_standing_knee_extension = -16.0

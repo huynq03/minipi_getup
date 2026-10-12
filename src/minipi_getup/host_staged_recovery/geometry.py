@@ -159,6 +159,13 @@ def rise_ready_score(feet_under_com, two_foot, flat_min, com_score):
   return feet_under_com * two_foot * flat_min * com_score
 
 
+def one_foot_rise_cost(loaded, two_foot, rise_gate):
+  """Rising with the load on one foot: (most loaded foot's support) x
+  (1 - two-foot share score) x rise gate. Zero for an even two-foot push, and
+  for knee/body support with no foot load (limited by the knee terms)."""
+  return loaded * (1.0 - two_foot) * rise_gate
+
+
 def load_imbalance_cost(left_n, right_n, weight_n, floor_fraction):
   """((L - R) / (L + R + floor*W))^2: ~1 on one foot, 0 for an even split."""
   return ((left_n - right_n) / (left_n + right_n + floor_fraction * weight_n)).square()
