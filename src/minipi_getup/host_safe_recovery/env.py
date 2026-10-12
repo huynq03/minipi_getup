@@ -10,6 +10,7 @@ from mjlab.sensor import ContactMatch, ContactSensor, ContactSensorCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.sim.sim import Simulation
 from mjlab.terrains import TerrainEntityCfg
+from mjlab.utils.lab_api.math import quat_apply_inverse
 
 import minipi_getup.host.env as host_env
 from minipi_getup.host.env import LeggedRobot_Pi, torch_rand_float
@@ -18,6 +19,7 @@ from minipi_getup.host_safe_recovery.asset import REAL_TORQUE
 RESET_CLASSES = ("supine", "prone", "left", "right", "intermediate")
 FEET_CONTACT_SENSOR = "safe_recovery_feet_ground"
 NONFOOT_CONTACT_SENSOR = "safe_recovery_nonfoot_ground"
+SOLE_SLIP_SENSOR = "safe_recovery_sole_slip"
 
 
 def _saturating_support(
@@ -35,6 +37,73 @@ def _saturating_support(
 def _foot_support_score(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
   """Independent single-foot credit plus an explicit two-foot support bonus."""
   return 0.5 * (left + right) + 0.5 * left * right
+
+
+def _sole_contact_coverage(force_history: torch.Tensor, scale_n: torch.Tensor) -> torch.Tensor:
+  """Fraction of sole strips contacting terrain, averaged over physics samples.
+
+  A proxy for coverage, not an exact contact area. Saturate each strip before
+  averaging so one loaded edge or one impact cannot replace broad contact.
+  """
+  normal = force_history[..., 2].abs()
+  return (-torch.expm1(-normal / scale_n[:, None, None].clamp_min(1e-6))).mean(dim=(1, 2))
+
+
+def _knee_sole_progress(knee_delta, coverage_delta, scale_rad):
+  """Only simultaneous flexion and better same-foot contact earn credit."""
+  return (torch.relu(knee_delta) / scale_rad).clamp(max=1.0) * torch.relu(coverage_delta)
+
+
+def _com_ascent_cost(velocity, threshold, excess_scale):
+  excess = torch.relu(velocity - threshold)
+  return excess.square() + excess.pow(4) / excess_scale**2
+
+
+def _rotation_speed_cost(angular_velocity, threshold):
+  return torch.relu(torch.linalg.vector_norm(angular_velocity, dim=-1) - threshold).square()
+
+
+def _contact_tangential_speed_cost(linear, angular, offset, threshold, scale):
+  """Linear excess contact-point speed: dragging a loaded sole at 0.1-0.3 m/s is
+  costly, unlike a squared m/s cost that only grows above ~0.3 m/s."""
+  velocity = linear + torch.cross(angular, offset, dim=-1)
+  return torch.relu(torch.linalg.vector_norm(velocity[..., :2], dim=-1) - threshold) / scale
+
+
+def _loaded_hip_roll_excess(outward, support, soft_rad):
+  """Wide outward hip roll is free on an unloaded leg (stepping) but costly while
+  that leg's sole carries load, where closing it drags the sole across the ground."""
+  return (torch.relu(outward - soft_rad).square() * support).mean(dim=1)
+
+
+def _loaded_coverage_deficit(coverage, support, minimum):
+  """Squared relative deficit, independently weighted by same-foot load."""
+  return ((torch.relu(minimum - coverage) / minimum).square() * support).mean(dim=1)
+
+
+def _sole_tilt_cost(foot_quat: torch.Tensor, sigma_rad: float) -> torch.Tensor:
+  """Bounded tilt of the sole plane against the horizontal ground, in [0, 1).
+
+  Covers both roll (side edge) and pitch (heel/toe), which strip coverage
+  cannot distinguish because the strips run heel-to-toe.
+  """
+  down = torch.zeros_like(foot_quat[..., :3])
+  down[..., 2] = -1.0
+  gravity = quat_apply_inverse(foot_quat.reshape(-1, 4), down.reshape(-1, 3)).reshape(down.shape)
+  tilt = torch.acos((-gravity[..., 2]).clamp(-1.0, 1.0))
+  return -torch.expm1(-(tilt / sigma_rad).square())
+
+
+def _loaded_knee_flexion(calf, support, gate, scale_rad):
+  """Saturating credit for knee flexion (positive calf) on load-bearing legs."""
+  flexion = -torch.expm1(-torch.relu(calf) / scale_rad)
+  return gate * (flexion * support).mean(dim=1)
+
+
+def _loaded_knee_hyperextension(calf, support, gate, soft_rad, span_rad):
+  """Squared cost of pushing a load-bearing knee into its negative (reverse) range."""
+  excess = (torch.relu(-calf - soft_rad) / span_rad).square()
+  return gate * (excess * support).mean(dim=1)
 
 
 def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -83,7 +152,13 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
         env_spacing=self.cfg.env.env_spacing,
         terrain=TerrainEntityCfg(terrain_type="plane"),
         entities={"robot": host_env.get_robot_cfg(self.limit_solref)},
-        sensors=(foot_sensor, nonfoot_sensor),
+        sensors=(foot_sensor, nonfoot_sensor, ContactSensorCfg(
+          name=SOLE_SLIP_SENSOR,
+          primary=ContactMatch(mode="geom", pattern=r"^[rl]_foot[1-5]_collision$", entity="robot"),
+          secondary=ContactMatch(mode="body", pattern="terrain"),
+          fields=("found", "force", "pos", "normal", "tangent"),
+          reduce="maxforce", global_frame=True,
+        )),
         extent=2.0,
       ),
       device=self.device,
@@ -109,6 +184,7 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     self.robot = self.scene["robot"]
     self.feet_ground_sensor: ContactSensor = self.scene[FEET_CONTACT_SENSOR]
     self.nonfoot_ground_sensor: ContactSensor = self.scene[NONFOOT_CONTACT_SENSOR]
+    self.sole_slip_sensor: ContactSensor = self.scene[SOLE_SLIP_SENSOR]
     self._create_envs()
 
   def _create_envs(self):
@@ -122,6 +198,20 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
   def _init_buffers(self):
     super()._init_buffers()
     self.reset_class = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+    self.penalty_success_ema = torch.zeros((), device=self.device)
+    self.penalty_stand_hold = torch.zeros(self.num_envs, device=self.device)
+    self.penalty_stood_on_feet = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self.penalty_stand_window = torch.zeros(self.num_envs, round(self.cfg.safe_recovery.penalty_stand_hold_s / self.dt), device=self.device)
+    self.knee_contact_indices = torch.tensor(
+      [self.dof_names.index(f"{side}_calf_joint") for side in ("l", "r")],
+      device=self.device,
+    )
+    self.previous_contact_knees = torch.zeros(self.num_envs, 2, device=self.device)
+    self.previous_sole_coverage = torch.zeros(self.num_envs, 2, device=self.device)
+    self.knee_contact_progress_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self.previous_contact_hip_roll = torch.zeros(self.num_envs, 2, device=self.device)
+    self.previous_hip_sole_coverage = torch.zeros(self.num_envs, 2, device=self.device)
+    self.hip_contact_progress_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
     self.overspeed_peak_by_joint = torch.zeros_like(self.dof_vel)
     self.overspeed_steps_by_joint = torch.zeros_like(self.dof_vel)
     sigma, weight = [], []
@@ -168,6 +258,17 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     self.support_memory = torch.zeros(self.num_envs, 2, device=self.device)
     self.ascent_cost_history = torch.zeros(
       self.num_envs, self.cfg.control.decimation, device=self.device
+    )
+    self.rotation_cost_history = torch.zeros_like(self.ascent_cost_history)
+    self.slip_cost_history = torch.zeros_like(self.ascent_cost_history)
+    geom_names = [name.split('/')[-1] for name in self.robot.geom_names]
+    slip_names = self.sole_slip_sensor.primary_names
+    self.slip_geom_indices = torch.tensor([geom_names.index(n.split('/')[-1]) for n in slip_names], device=self.device)
+    self.slip_side_indices = torch.tensor([0 if n.split('/')[-1].startswith('l_') else 1 for n in slip_names], device=self.device)
+    body_names = list(self.robot.body_names)
+    self.sole_body_indices = torch.tensor(
+      [body_names.index(f"{side}_ankle_roll_link") for side in ("l", "r")],
+      dtype=torch.long, device=self.device,
     )
 
   def _reset_dofs(self, env_ids):
@@ -277,6 +378,37 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     stable_right = right * self.support_memory[:, 1]
     return 0.5 * (left + right) + 0.5 * stable_left * stable_right
 
+  def _sole_coverage(self):
+    history = self.feet_ground_sensor.data.force_history
+    if history is None:
+      raise RuntimeError("sole contact force history is unavailable")
+    body_ids = self.robot.indexing.body_ids.long()
+    weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
+    scale = weight * self.cfg.safe_recovery.sole_contact_scale_weight_fraction
+    left = _sole_contact_coverage(history[:, self.left_sole_force_indices], scale)
+    right = _sole_contact_coverage(history[:, self.right_sole_force_indices], scale)
+    return torch.stack((left, right), dim=1)
+
+  def _reward_sole_contact_coverage(self):
+    left, right = self._sole_coverage().unbind(dim=1)
+    # Active from the fallen pose: sequential placement gets credit, both soles
+    # get extra credit. No height/hip/knee target or mandatory ordering gate.
+    return _foot_support_score(left, right)
+
+  def _reward_knee_sole_progress(self):
+    coverage = self._sole_coverage()
+    knees = self.dof_pos[:, self.knee_contact_indices]
+    progress = _knee_sole_progress(
+      knees - self.previous_contact_knees,
+      coverage - self.previous_sole_coverage,
+      self.cfg.safe_recovery.knee_contact_progress_scale_rad,
+    ).mean(dim=1)
+    reward = progress * self.knee_contact_progress_valid * (1.0 - self._standing_gate())
+    self.previous_contact_knees.copy_(knees)
+    self.previous_sole_coverage.copy_(coverage)
+    self.knee_contact_progress_valid.fill_(True)
+    return reward
+
   def _reward_nonfoot_support(self):
     _, _, nonfoot_force = self._ground_support_forces()
     _, _, nonfoot = self._normalized_supports()
@@ -338,14 +470,54 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor(
       [1.0, -1.0], device=self.device
     )
-    # Monotonic outward credit with diminishing returns; inward angles receive
-    # negative credit. No narrow target that discourages opening beyond 11 deg.
-    score = torch.tanh(outward / cfg.recovery_hip_roll_scale_rad).mean(dim=1)
+    coverage = self._sole_coverage()
+    # Reward useful outward movement, not a large held angle. Separate history
+    # from the knee term makes evaluation independent of reward iteration order.
+    score = _knee_sole_progress(
+      outward - self.previous_contact_hip_roll,
+      coverage - self.previous_hip_sole_coverage,
+      cfg.recovery_hip_roll_progress_scale_rad,
+    ).mean(dim=1)
+    reward = score * self.hip_contact_progress_valid * (1.0 - self._standing_gate())
+    self.previous_contact_hip_roll.copy_(outward)
+    self.previous_hip_sole_coverage.copy_(coverage)
+    self.hip_contact_progress_valid.fill_(True)
+    return reward
+
+  def _reward_loaded_hip_roll_excess(self):
+    outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor(
+      [1.0, -1.0], device=self.device
+    )
     left, right, _ = self._normalized_supports()
-    useful_support = 0.35 + 0.65 * torch.maximum(left, right)
-    # Preparation shaping fades as standing is established, allowing the
-    # existing default-posture objective to bring the legs back in.
-    return score * useful_support * (1.0 - self._standing_gate())
+    return _loaded_hip_roll_excess(
+      outward, torch.stack((left, right), dim=1),
+      self.cfg.safe_recovery.loaded_hip_roll_soft_rad,
+    )
+
+  def _knee_lift_gate(self):
+    """Torso off the floor but not yet standing: the squat/lift phase."""
+    cfg = self.cfg.safe_recovery
+    elevated = torch.sigmoid(
+      (self.root_states[:, 2] - cfg.knee_lift_gate_height_center)
+      / cfg.knee_lift_gate_height_width
+    )
+    return elevated * (1.0 - self._standing_gate())
+
+  def _reward_loaded_knee_flexion(self):
+    left, right, _ = self._normalized_supports()
+    return _loaded_knee_flexion(
+      self.dof_pos[:, self.knee_contact_indices], torch.stack((left, right), dim=1),
+      self._knee_lift_gate(), self.cfg.safe_recovery.knee_flexion_scale_rad,
+    )
+
+  def _reward_loaded_knee_hyperextension(self):
+    cfg = self.cfg.safe_recovery
+    left, right, _ = self._normalized_supports()
+    return _loaded_knee_hyperextension(
+      self.dof_pos[:, self.knee_contact_indices], torch.stack((left, right), dim=1),
+      self._knee_lift_gate(), cfg.knee_hyperextension_soft_rad,
+      cfg.knee_hyperextension_span_rad,
+    )
 
   def _knee_height_credit(self):
     left, right, _ = self._ground_support_forces()
@@ -374,14 +546,79 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
   def _reward_ballistic_ascent(self):
     return self.ascent_cost_history.mean(dim=1)
 
+  def _reward_recovery_rotation(self):
+    residual = self.cfg.safe_recovery.recovery_rotation_standing_residual
+    gate = 1.0 - (1.0 - residual) * self._standing_gate()
+    initial = self.cfg.safe_recovery.penalty_initial_rotation_fraction
+    return (initial + (1.0 - initial) * self._penalty_curriculum_strength()) * gate * self.rotation_cost_history.mean(dim=1)
+
+  def _recovery_regu_multiplier(self):
+    initial = self.cfg.safe_recovery.penalty_initial_regu_fraction
+    return initial + (1.0 - initial) * self._penalty_curriculum_strength()
+
+  def _reward_action_rate(self):
+    return super()._reward_action_rate() * self._recovery_regu_multiplier()
+
+  def _reward_smoothness(self):
+    return super()._reward_smoothness() * self._recovery_regu_multiplier()
+
+  def _reward_loaded_sole_slip(self):
+    return self.slip_cost_history.mean(dim=1)
+
+  def _reward_loaded_sole_coverage_deficit(self):
+    left, right, _ = self._normalized_supports()
+    load = torch.stack((left, right), dim=1)
+    return _loaded_coverage_deficit(
+      self._sole_coverage(), load, self.cfg.safe_recovery.loaded_sole_min_coverage)
+
+  def _reward_loaded_sole_tilt(self):
+    left, right, _ = self._normalized_supports()
+    load = torch.stack((left, right), dim=1)
+    tilt = _sole_tilt_cost(
+      self.robot.data.body_link_quat_w[:, self.sole_body_indices],
+      self.cfg.safe_recovery.sole_tilt_sigma_rad,
+    )
+    # Load-weighted: an unloaded foot may swing tilted; a loaded one must be flat.
+    return (load * tilt).mean(dim=1)
+
+  def _standing_penalty_boost(self, maximum):
+    """Success-curriculum strengthening with a smooth standing-state gate.
+
+    Accept one load-bearing foot during transfer; require persistent support
+    and upright/elevated posture before increasing the existing costs.
+    """
+    left, right, _ = self._normalized_supports()
+    sustained = torch.stack((left, right), dim=1) * self.support_memory
+    gate = self._penalty_curriculum_strength() * self._standing_gate() * sustained.max(dim=1).values
+    return 1.0 + (maximum - 1.0) * gate
+
+  def _penalty_curriculum_strength(self):
+    cfg = self.cfg.safe_recovery
+    fraction = ((self.penalty_success_ema - cfg.penalty_success_start)
+                / (cfg.penalty_success_full - cfg.penalty_success_start)).clamp(0.0, 1.0)
+    return fraction.square() * (3.0 - 2.0 * fraction)
+
+  def update_success_monitor(self):
+    super().update_success_monitor()
+    left, right, _ = self._normalized_supports()
+    feet = torch.stack((left, right), dim=1) * self.support_memory
+    standing = ((self.root_states[:, 2] > host_env.STAND_HEIGHT)
+                & (self.projected_gravity[:, 2] < -0.8)
+                & (feet.min(dim=1).values > 0.25))
+    # A 0.5 s window tolerates brief unloading, but sitting cannot qualify.
+    self.penalty_stand_window = torch.roll(self.penalty_stand_window, -1, dims=1)
+    self.penalty_stand_window[:, -1] = standing.float()
+    self.penalty_stood_on_feet |= standing & (self.penalty_stand_window.mean(1) >= self.cfg.safe_recovery.penalty_stand_support_fraction)
+
   def _reward_joint_overspeed(self):
     excess = torch.relu(torch.abs(self.dof_vel) - self.cfg.safe_recovery.overspeed_soft_rad_s)
     excess_sq = excess.square()
-    return 0.5 * excess_sq.mean(dim=1) + 0.5 * excess_sq.max(dim=1).values
+    return (0.5 * excess_sq.mean(dim=1) + 0.5 * excess_sq.max(dim=1).values) * self._recovery_regu_multiplier()
 
   def _reward_default_posture(self):
     normalized = (self.dof_pos - self.default_dof_pos) / self.pose_sigma
-    return self._standing_gate() * torch.mean(self.pose_weight * normalized.square(), dim=1)
+    boost = self._standing_penalty_boost(self.cfg.safe_recovery.standing_posture_penalty_multiplier)
+    return boost * self._standing_gate() * torch.mean(self.pose_weight * normalized.square(), dim=1)
 
   def _reward_stable_standing(self):
     cfg = self.cfg.safe_recovery
@@ -389,11 +626,13 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     motion += cfg.stable_base_angular_velocity_weight * torch.sum(
       self.base_ang_vel.square(), dim=1
     )
-    return self._standing_gate() * motion
+    boost = self._standing_penalty_boost(cfg.standing_motion_penalty_multiplier)
+    return boost * self._standing_gate() * motion
 
   def _substep_monitor(self):
     self.feet_ground_sensor.update(self.cfg.sim.dt)
     self.nonfoot_ground_sensor.update(self.cfg.sim.dt)
+    self.sole_slip_sensor.update(self.cfg.sim.dt)
     left, right, _ = self._normalized_supports()
     support = torch.stack((left, right), dim=1)
     cfg = self.cfg.safe_recovery
@@ -405,15 +644,33 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     self.support_memory += (1.0 - torch.exp(-self.cfg.sim.dt / tau)) * (
       support - self.support_memory
     )
-    stable = (support * self.support_memory).max(dim=1).values
     vz = self.robot.data.root_com_lin_vel_w[:, 2]
-    excess = torch.relu(vz - cfg.upward_velocity_soft_m_s)
-    # Single-foot support is allowed. Residual cost prevents a loaded foot from
-    # making a high-speed launch free; monitor every 5 ms to capture brief spikes.
-    cost = excess.square() * (1.0 - 0.8 * stable)
+    # Immediate cost sampled every 5 ms; no success gate or foot exemption.
+    strength = self._penalty_curriculum_strength()
+    threshold = cfg.initial_upward_velocity_soft_m_s + strength * (cfg.upward_velocity_soft_m_s - cfg.initial_upward_velocity_soft_m_s)
+    excess = torch.relu(vz - threshold)
+    cost = excess.square() + strength * excess.pow(4) / cfg.ascent_excess_scale_m_s**2
     cost *= self.real_episode_length_buf > self.unactuated_time
     self.ascent_cost_history = torch.roll(self.ascent_cost_history, 1, dims=1)
     self.ascent_cost_history[:, 0] = cost
+    rotation = _rotation_speed_cost(
+      self.robot.data.root_link_ang_vel_w, cfg.recovery_rotation_soft_rad_s)
+    rotation *= self.real_episode_length_buf > self.unactuated_time
+    self.rotation_cost_history = torch.roll(self.rotation_cost_history, 1, dims=1)
+    self.rotation_cost_history[:, 0] = rotation
+    contact = self.sole_slip_sensor.data
+    indices = self.slip_geom_indices
+    d = self.robot.data
+    slip = _contact_tangential_speed_cost(
+      d.geom_lin_vel_w[:, indices], d.geom_ang_vel_w[:, indices],
+      contact.pos - d.geom_pos_w[:, indices], cfg.sole_slip_soft_m_s, cfg.sole_slip_scale_m_s)
+    weight = self.sim.model.body_mass[:, self.robot.indexing.body_ids.long()].sum(1) * abs(self.cfg.sim.gravity[2])
+    load = _saturating_support(contact.force[..., 2].abs(), weight[:, None], 0.002, 0.05)
+    # Instantaneous foot support: dragging during transient load transfer counts.
+    slip_cost = (slip * load * support[:, self.slip_side_indices] * (contact.found > 0)).mean(1)
+    slip_cost *= self.real_episode_length_buf > self.unactuated_time
+    self.slip_cost_history = torch.roll(self.slip_cost_history, 1, dims=1)
+    self.slip_cost_history[:, 0] = slip_cost
     super()._substep_monitor()
     speed = torch.abs(self.dof_vel)
     self.overspeed_peak_by_joint = torch.maximum(self.overspeed_peak_by_joint, speed)
@@ -422,7 +679,13 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     )
 
   def _log_reset_metrics(self, env_ids):
+    if len(env_ids):
+      success = (self.penalty_stood_on_feet[env_ids] & ~self.fell_after_stand[env_ids]).float().mean()
+      alpha = -math.expm1(-len(env_ids) / self.cfg.safe_recovery.penalty_success_ema_episodes)
+      self.penalty_success_ema += alpha * (success - self.penalty_success_ema)
     super()._log_reset_metrics(env_ids)
+    self.reset_stats["penalty_foot_success_ema"] = self.penalty_success_ema.clone()
+    self.reset_stats["penalty_curriculum_strength"] = self._penalty_curriculum_strength().clone()
     steps = self.episode_length_buf[env_ids].float().clamp_min(1.0)
     self.reset_stats["left_foot_normal_force"] = (
       self.ep_left_foot_force[env_ids] / steps
@@ -452,6 +715,11 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
   def reset_idx(self, env_ids):
     super().reset_idx(env_ids)
     if len(env_ids):
+      self.knee_contact_progress_valid[env_ids] = False
+      self.hip_contact_progress_valid[env_ids] = False
+      self.penalty_stand_hold[env_ids] = 0
+      self.penalty_stand_window[env_ids] = 0
+      self.penalty_stood_on_feet[env_ids] = False
       self.feet_ground_sensor.reset(env_ids)
       self.nonfoot_ground_sensor.reset(env_ids)
       self.overspeed_peak_by_joint[env_ids] = 0
@@ -462,9 +730,21 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
       self.ep_both_foot_support[env_ids] = 0
       self.support_memory[env_ids] = 0
       self.ascent_cost_history[env_ids] = 0
+      self.rotation_cost_history[env_ids] = 0
+      self.slip_cost_history[env_ids] = 0
+      self.sole_slip_sensor.reset(env_ids)
 
   def update_force_curriculum(self, env_ids):
     if torch.mean(self.old_headheight[env_ids]) > self.cfg.curriculum.threshold_height:
       step = self.cfg.safe_recovery.force_curriculum_step_n
       self.force[env_ids] = (self.force[env_ids] - step).clamp_min(0.0)
-      self.action_rescale[env_ids] = (self.action_rescale[env_ids] - 0.02).clamp_min(0.25)
+      # Keep the original schedule down to 0.25, never raise a resumed scale.
+      current = self.action_rescale[env_ids]
+      self.action_rescale[env_ids] = torch.where(current > 0.25, (current - 0.02).clamp_min(0.25), current)
+    cfg = self.cfg.safe_recovery
+    if self.penalty_success_ema >= cfg.action_scale_success_threshold:
+      # Below 0.25 only successful, feet-supported episodes qualify, without
+      # external assistance. Failure pauses progression instead of forcing 0.10.
+      eligible = self.penalty_stood_on_feet[env_ids] & (self.force[env_ids].reshape(-1) <= 0)
+      ids = env_ids[eligible]
+      self.action_rescale[ids] = (self.action_rescale[ids] - cfg.action_scale_finetune_step).clamp_min(cfg.action_scale_min)

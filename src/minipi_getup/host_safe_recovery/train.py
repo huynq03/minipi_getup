@@ -60,11 +60,14 @@ def main() -> None:
   logdir = Path.cwd() / "logs" / EXPERIMENT_NAME / datetime.now().strftime("%Y%m%d_%H%M%S")
   logdir.mkdir(parents=True)
   commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+  # Hash once at startup: the XML may be edited on disk while training runs.
+  asset_digest = asset_sha256()
   metadata = {
     "variant": EXPERIMENT_NAME,
     "source_commit": commit,
+    "source_diff": subprocess.check_output(["git", "diff", "--", "src/minipi_getup/host_safe_recovery"], text=True),
     "asset": str(ASSET_XML),
-    "asset_sha256": asset_sha256(),
+    "asset_sha256": asset_digest,
     "seed": args.seed,
     "num_envs": args.num_envs,
     "max_iterations": args.max_iterations,
@@ -83,7 +86,7 @@ def main() -> None:
       p.error("checkpoint is not compatible with this variant and asset")
     runner.load(str(args.resume))
     state = info.get("curriculum_state") or {}
-    for name in ("force", "action_rescale"):
+    for name in ("force", "action_rescale", "penalty_success_ema"):
       if name in state:
         saved = state[name].to(env.device)
         getattr(env, name).copy_(saved if saved.shape == getattr(env, name).shape else saved.mean().expand_as(getattr(env, name)))
@@ -93,10 +96,10 @@ def main() -> None:
     payload = dict(infos or {})
     payload.update(
       variant=EXPERIMENT_NAME,
-      asset_sha256=asset_sha256(),
+      asset_sha256=asset_digest,
       source_commit=commit,
       action_std_bounds=[args.min_action_std, args.max_action_std],
-      curriculum_state={n: getattr(env, n).detach().cpu() for n in ("force", "action_rescale")},
+      curriculum_state={n: getattr(env, n).detach().cpu() for n in ("force", "action_rescale", "penalty_success_ema")},
     )
     old_save(path, infos=payload, it=it)
   runner.save = types.MethodType(save, runner)
@@ -106,7 +109,7 @@ def main() -> None:
     p.error("--max-iterations must exceed the checkpoint iteration")
   print(
     f"[{EXPERIMENT_NAME}] {'resume' if args.resume else 'scratch'}; "
-    f"asset={ASSET_XML}; sha256={asset_sha256()}; logs={logdir}", flush=True
+    f"asset={ASSET_XML}; sha256={asset_digest}; logs={logdir}", flush=True
   )
   runner.learn(remaining, init_at_random_ep_len=pcfg.runner.init_at_random_ep_len)
 
