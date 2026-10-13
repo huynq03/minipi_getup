@@ -65,6 +65,15 @@ The script has these options:
 - the package has uncommitted changes (commit first: the run records its commit);
 - the GPU is busy (use `-b`).
 
+### Resuming the tracked rev13 checkpoint
+
+`checkpoints/rev13/model_1100.pt` is in the repository. See `checkpoints/rev13/README.md` for where it
+comes from and how it behaves.
+
+```bash
+tools/train_host_staged.sh -r checkpoints/rev13/model_1100.pt -i 8000 -N rev13_from1100
+```
+
 ### Resuming a checkpoint from another machine
 
 Checkpoints are not in git. Copy one over, then resume:
