@@ -85,7 +85,23 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # Anchor: drift of a planted foot from where it was set down.
     anchor_deadband_m = 0.01
     anchor_scale_m = 0.02
-    anchor_cost_cap = 3.0
+    anchor_cost_cap = 10.0
+    # The anchor cost is multiplied by 1 + (episode loaded sliding while standing) / this.
+    anchor_escalation_m = 0.05
+    # Touchdown reward: stance error removed by a step, per this many metres.
+    step_gain_scale_m = 0.02
+    step_gain_cap = 3.0
+    # Post-stand loaded sliding per foot that ends the episode (training only): off
+    # until the success curriculum starts, then start -> final metres.
+    drag_termination = True
+    drag_termination_start_m = 0.20
+    drag_termination_final_m = 0.06
+    # Stance starts: this share of resets begin standing in a displaced stance
+    # (2-8 cm wider per foot, staggered up to +-8 cm), actuated at once, no pull
+    # force, excluded from the curriculum EMA and the fallen-start metrics.
+    stance_start_prob = 0.15
+    stance_start_poses = 64
+    stance_start_joint_noise_rad = 0.02
     # Default foot place relative to its hip (zero joints): 5.68 cm outward, 0.37 cm forward.
     stance_default_out_m = 0.0568
     stance_default_fwd_m = 0.0037
@@ -171,6 +187,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       # feet return to their default place (task space), by stepping.
       style_standing_foot_anchor = -4.0
       target_stance_return = 4.0
+      # Impulse at each touchdown while standing: (error before - after) / 2 cm.
+      target_step_placement = 100.0
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
       # Getting up must use both feet: any rising step with the load on one foot pays.

@@ -15,6 +15,8 @@ from minipi_getup.host_safe_recovery.env import (
   _sole_tilt_cost,
 )
 from minipi_getup.host_staged_recovery import geometry as geo
+from minipi_getup.host_staged_recovery.asset import ASSET_XML
+from minipi_getup.host_staged_recovery.stance_poses import build_stance_library
 
 LEG_CONTACT_SENSOR = "staged_leg_leg_contact"
 
@@ -105,6 +107,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       for s in ("l", "r")
     ])  # (2, num_dof)
     self.foot_anchor = zeros(2, 2)
+    self.anchor_valid = torch.zeros(n, dtype=torch.bool, device=dev)
     self.foot_lifted = torch.zeros(n, 2, dtype=torch.bool, device=dev)
     self.foot_air_time = zeros(2)
     self.foot_down_time = zeros(2)
@@ -114,6 +117,16 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.ep_standing_lifts = zeros()
     self.ep_anchor_drift = zeros()
     self.ep_stance_err = zeros()
+    self.lift_err = zeros(2)  # stance error when the foot was last lifted
+    self.step_gain = zeros()  # this step's touchdown improvement (scored by the reward)
+    self.ep_step_gain = zeros()
+    self.ep_post_drag = zeros(2)  # loaded travel per foot while fully standing
+    self.drag_out = torch.zeros(n, dtype=torch.bool, device=dev)
+    # Stance starts: displaced standing stances (IK library), actuated at once.
+    self.stance_start = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.saved_force = self.force.clone()
+    lib = build_stance_library(str(ASSET_XML), list(self.dof_names), n=self.cfg.staged.stance_start_poses)
+    self.stance_lib = {k: torch.tensor(v, dtype=torch.float, device=dev) for k, v in lib.items()}
     self.ep_ready_before_rise = torch.zeros(n, dtype=torch.bool, device=dev)
     self.rise_gate = zeros()
     self.ep_rise_steps = zeros()
@@ -165,8 +178,10 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       -self.projected_gravity[:, 2] > cfg.anchor_stand_upright
     )
     self.ep_standing_lifts += (self.foot_lifted & ~was_lifted & standing_now[:, None]).float().sum(dim=1)
-    follow = self.foot_lifted | ~standing_now[:, None]
+    # A fresh episode (stance starts begin already standing) anchors where the feet are.
+    follow = self.foot_lifted | ~standing_now[:, None] | ~self.anchor_valid[:, None]
     self.foot_anchor[:] = geo.foot_anchor_update(self.foot_anchor, xy, follow)
+    self.anchor_valid.fill_(True)
     lateral = geo.lateral_axis(self.root_states[:, 3:7], foot_quat)
     forward = torch.stack((lateral[:, 1], -lateral[:, 0]), dim=-1)
     self.stance_err[:] = geo.stance_offset_error(
@@ -193,6 +208,21 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.foot_hold, self.support_memory, self.sole_clearance < cfg.foot_translation_contact_clearance_m,
       math.exp(-self.dt / cfg.foot_translation_hold_decay_s),
     )
+    # Steps while standing: stance error at lift-off vs at touchdown (signed, so
+    # stepping out and back in nets zero).
+    lift_off = self.foot_lifted & ~was_lifted
+    touchdown = was_lifted & ~self.foot_lifted & standing_now[:, None]
+    self.lift_err[:] = torch.where(lift_off, self.stance_err, self.lift_err)
+    gain = geo.step_placement_gain(self.lift_err, self.stance_err, cfg.step_gain_scale_m, cfg.step_gain_cap)
+    self.step_gain[:] = (gain * touchdown).sum(dim=1)
+    self.ep_step_gain += self.step_gain
+    # Loaded sliding while fully standing (escalates the anchor cost, may terminate):
+    # a foot on the ground carrying >= the lift threshold of the weight, i.e. any
+    # foot that is not lifted, as soon as it moves (no settling delay).
+    sliding = (self.sole_clearance < cfg.foot_translation_contact_clearance_m) & (
+      forces >= cfg.lift_unloaded_weight_fraction * w
+    )
+    self.ep_post_drag += self.foot_speed_xy * self.dt * sliding * standing_now[:, None]
     left, right, _ = self._normalized_supports()
     load = torch.stack((left, right), dim=1)
     valid = (corners[..., 2] < cfg.corner_contact_height_m) & (load[:, :, None] > cfg.support_foot_min)
@@ -330,6 +360,19 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     if not self.cfg.staged.velocity_termination:
       self.overspeed_out[:] = False
     self.reset_buf |= self.overspeed_out
+    # Too much loaded sliding after standing ends the episode (training only).
+    self.drag_out = self.ep_post_drag.max(dim=1).values > self.drag_termination_limit()
+    if not self.cfg.staged.drag_termination:
+      self.drag_out[:] = False
+    self.reset_buf |= self.drag_out
+
+  def drag_termination_limit(self) -> torch.Tensor:
+    """Post-stand loaded sliding allowed per foot: off (inf) until the success
+    curriculum starts, then start -> final metres as it completes."""
+    cfg = self.cfg.staged
+    s = self._penalty_curriculum_strength()
+    limit = cfg.drag_termination_start_m + s * (cfg.drag_termination_final_m - cfg.drag_termination_start_m)
+    return torch.where(s > 0, limit, torch.full_like(limit, math.inf))
 
   def compute_reward(self):
     self._update_stage_state()
@@ -480,7 +523,14 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.sole_centres[..., :2], self.foot_anchor, self.foot_hold,
       cfg.anchor_deadband_m, cfg.anchor_scale_m, cfg.anchor_cost_cap,
     )
-    return cost * self._standing_gate()
+    # Escalates with the episode's accumulated loaded sliding: a policy that keeps
+    # sliding pays more and more.
+    escalation = 1.0 + self.ep_post_drag.max(dim=1).values / cfg.anchor_escalation_m
+    return cost * escalation * self._standing_gate()
+
+  def _reward_step_placement(self):
+    # Impulse at touchdown: stance error removed by this step (negative if worse).
+    return self.step_gain
 
   def _reward_stance_return(self):
     # Each planted foot near its default place under its hip (task space).
@@ -536,6 +586,38 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.actuated_peak_vel = torch.maximum(self.actuated_peak_vel, peak)
 
   # ------------------------------------------------------------------ resets
+  def _penalty_ema_ids(self, env_ids):
+    # Stance starts begin on their feet; they must not advance the curriculum.
+    return env_ids[~self.stance_start[env_ids]]
+
+  def _reset_root_states(self, env_ids):
+    super()._reset_root_states(env_ids)
+    cfg = self.cfg.staged
+    pick = torch.rand(len(env_ids), device=self.device) < cfg.stance_start_prob
+    self.stance_start[env_ids] = pick
+    ids = env_ids[pick]
+    n = len(ids)
+    if not n:
+      return
+    lib = self.stance_lib
+    k = torch.randint(0, len(lib["base_xyz"]), (n,), device=self.device)
+    lower = self.robot.data.joint_pos_limits[0, :, 0]
+    upper = self.robot.data.joint_pos_limits[0, :, 1]
+    q = lib["dof_pos"][k] + torch_rand_float(-1.0, 1.0, (n, self.num_dof), self.device) * cfg.stance_start_joint_noise_rad
+    self.dof_pos[ids] = torch.maximum(torch.minimum(q, upper - 0.01), lower + 0.01)
+    self.dof_vel[ids] = 0.0
+    self.robot.write_joint_state_to_sim(self.dof_pos[ids], self.dof_vel[ids], env_ids=ids)
+    yaw = torch_rand_float(-math.pi, math.pi, (n,), self.device).squeeze(-1)
+    quat = torch.stack((torch.cos(yaw / 2), torch.zeros_like(yaw), torch.zeros_like(yaw), torch.sin(yaw / 2)), -1)
+    bx, by = lib["base_xyz"][k, 0], lib["base_xyz"][k, 1]
+    self.root_states[ids, 0] = self.env_origins[ids, 0] + bx * torch.cos(yaw) - by * torch.sin(yaw)
+    self.root_states[ids, 1] = self.env_origins[ids, 1] + bx * torch.sin(yaw) + by * torch.cos(yaw)
+    self.root_states[ids, 2] = lib["base_xyz"][k, 2] + 0.002
+    self.root_states[ids, 3:7] = quat
+    self.root_states[ids, 7:13] = 0.0
+    self.base_quat[ids] = quat
+    self.robot.write_root_state_to_sim(self.root_states[ids], env_ids=ids)
+
   def _reset_dofs(self, env_ids):
     """Baseline reset distribution with absolute half-spans (ROM-independent)."""
     n = len(env_ids)
@@ -554,11 +636,29 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
   def _log_reset_metrics(self, env_ids):
     # The HoST monitor clears ever_stood inside its own logging.
-    stood = self.ever_stood[env_ids].clone()
+    stood_all = self.ever_stood[env_ids].clone()
+    success_all = (self.ever_stood[env_ids] & ~self.fell_after_stand[env_ids]).clone()
     super()._log_reset_metrics(env_ids)
     if not len(env_ids):
       return
     s = self.reset_stats
+    stance = self.stance_start[env_ids]
+    s["stance_start_frac"] = stance.float().mean()
+    s["stance_start_success"] = success_all[stance].float().mean() if stance.any() else torch.tensor(math.nan)
+    s["fallen_success"] = success_all[~stance].float().mean() if (~stance).any() else torch.tensor(math.nan)
+    s["term_drag"] = self.drag_out[env_ids].float().mean()
+    s["drag_termination_limit"] = self.drag_termination_limit().reshape(-1)[0]
+    s["post_stand_drag_m"] = self.ep_post_drag[env_ids].max(dim=1).values.mean()
+    s["step_placement_gain"] = self.ep_step_gain[env_ids].mean()
+    if stance.any():
+      st_ids = env_ids[stance]
+      s["stance_start_lifts_per_ep"] = self.ep_standing_lifts[st_ids].mean()
+      s["stance_start_final_err_m"] = self.stance_err[st_ids].mean()
+    # Stage, rise and standing metrics below describe fallen starts only.
+    stood = stood_all[~stance]
+    env_ids = env_ids[~stance]
+    if not len(env_ids):
+      return
     t_feet, t_com, t_rise = self.t_feet[env_ids], self.t_com[env_ids], self.t_rise[env_ids]
 
     def frac(mask):
@@ -619,11 +719,21 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     ).float().mean()
 
   def reset_idx(self, env_ids):
+    if len(env_ids):
+      # Give the pull-force curriculum back to envs leaving a stance start.
+      was = env_ids[self.stance_start[env_ids]]
+      self.force[was] = self.saved_force[was]
     super().reset_idx(env_ids)
     if len(env_ids):
+      # Stance starts: actuated at once (no passive phase) and no pull force.
+      new = env_ids[self.stance_start[env_ids]]
+      self.real_episode_length_buf[new] = int(self.unactuated_time) + 1
+      self.saved_force[new] = self.force[new]
+      self.force[new] = 0.0
       self.com_prev_valid[env_ids] = False
       self.sole_xy_valid[env_ids] = False
       self.foot_lifted[env_ids] = False
+      self.anchor_valid[env_ids] = False
       self.knee_time[env_ids] = 0
       for buf in (self.t_feet, self.t_com, self.t_rise):
         buf[env_ids] = -1.0
@@ -642,5 +752,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
                   self.ep_peak_hip_roll, self.ep_translation_cost, self.ep_actuated_steps,
                   self.ep_drag_dist, self.ep_move_load, self.ep_move_steps,
                   self.foot_air_time, self.foot_down_time, self.swing_exempt, self.ep_swing_exempt_time,
-                  self.ep_standing_lifts, self.ep_anchor_drift, self.ep_stance_err):
+                  self.ep_standing_lifts, self.ep_anchor_drift, self.ep_stance_err,
+                  self.lift_err, self.step_gain, self.ep_step_gain, self.ep_post_drag):
         buf[env_ids] = 0.0

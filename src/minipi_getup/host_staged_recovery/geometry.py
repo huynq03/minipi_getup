@@ -275,6 +275,12 @@ def stance_return_score(err, sigmas):
   return torch.stack([torch.exp(-(err / s).square()) for s in sigmas]).mean(0)
 
 
+def step_placement_gain(err_at_lift, err_now, scale, cap):
+  """(stance error at lift-off - at touchdown) / scale, clipped to +-cap. Signed,
+  so stepping out and back in nets zero."""
+  return ((err_at_lift - err_now) / scale).clamp(-cap, cap)
+
+
 def swing_credit(air_time, free_s, max_s):
   """1 for a foot that has been off the ground at most `free_s`, falling to 0
   at `max_s`: a short lift to re-place a foot is exempt, standing on one foot is not."""

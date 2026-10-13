@@ -375,3 +375,47 @@ Both feet may step, one after the other.
 
 Trained from scratch: at iteration 700 the policy noise std had fallen from 0.8 to 0.15, too little
 exploration to discover stepping.
+
+### 6a, after standing (2): make stepping discoverable, make sliding escalate
+
+**What happened at `model_800`** (first run with the anchor):
+- After standing, the policy slid each loaded foot 8–12 cm in the first 3 s.
+- It lifted a foot 0–0.27 times per episode, and reached a stance error of 3.7 cm.
+- It accepted about −57 of anchor cost per episode. A single lift would have re-anchored the foot,
+  but the policy had almost never lifted a foot while standing, so it never saw that.
+
+The changes:
+
+- **Stance starts.** 15% of training resets begin standing in a displaced stance, from an IK library
+  of 64 poses (`stance_poses.py`):
+  - Each foot is 2–8 cm wider than default; feet are mostly staggered up to ±8 cm fore-aft.
+  - Soles flat, COM between the feet, torso upright, base 0.33–0.35 m, random yaw.
+  - Episodes are actuated at once with no pull force. They are excluded from the curriculum EMA and
+    from the fallen-start stage, rise and standing metrics.
+  - Logged: `stance_start_success`, `stance_start_lifts_per_ep`, `stance_start_final_err_m`,
+    `fallen_success`.
+- **`target_step_placement` (+100, an impulse).** At each touchdown while standing:
+  `clip((e_at_lift − e_at_touchdown)/2 cm, ±3)`. It is signed, so stepping out and back in nets zero.
+  A step that removes 5 cm of stance error earns about +5.
+- **Escalating anchor cost.**
+  - The cap goes from 3 to 10 per foot.
+  - The cost is multiplied by `1 + post_stand_drag/5 cm`. `post_stand_drag` is the episode's loaded
+    sliding while fully standing, per foot max: travel of a foot within 5 mm of the ground carrying
+    ≥ 5% W, counted from the first contact with no settling delay.
+- **Drag termination (training only).** An episode ends when `post_stand_drag` exceeds a limit. The
+  limit is off until the success curriculum starts, then goes from 20 cm to 6 cm as it completes.
+  Logged: `term_drag`, `drag_termination_limit`, `post_stand_drag_m`.
+- **Anchors** are initialised at the feet on the first step of every episode, so stance starts do not
+  inherit a stale anchor.
+
+Evaluation and playback disable the drag termination and the stance starts.
+
+**Checked on `model_800`, all resets forced to stance starts:**
+
+| Measure | Value |
+|---|---|
+| Standing at step 0 | yes, h 0.341, both feet loaded after one step |
+| Stance error at reset | 5.8 cm |
+| Feet slide (old policy) | 6.6 cm, `post_stand_drag` 7.4 cm |
+| Anchor cost | about ×2.5 |
+| Lifts | 0 |

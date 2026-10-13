@@ -225,6 +225,21 @@ class GeometryTests(unittest.TestCase):
     self.assertGreater(score[2].item(), 0.1)  # still a gradient 8.8 cm away
     self.assertAlmostEqual(score[1].item(), 0.5 * math.exp(-1) + 0.5 * math.exp(-1 / 16), places=5)
 
+  def test_step_placement_gain_is_signed_and_capped(self):
+    gain = geo.step_placement_gain(torch.tensor([0.08, 0.02, 0.2]), torch.tensor([0.02, 0.08, 0.0]), 0.02, 3.0)
+    self.assertTrue(torch.allclose(gain, torch.tensor([3.0, -3.0, 3.0])))
+    out_and_back = geo.step_placement_gain(torch.tensor(0.03), torch.tensor(0.05), 0.02, 3.0) + geo.step_placement_gain(
+      torch.tensor(0.05), torch.tensor(0.03), 0.02, 3.0)
+    self.assertAlmostEqual(out_and_back.item(), 0.0, places=6)
+
+  def test_stance_library_feet_flat_and_displaced(self):
+    from minipi_getup.host_staged_recovery.stance_poses import build_stance_library
+    names = [f"{s}_{j}_joint" for s in "rl" for j in ("hip_pitch", "hip_roll", "thigh", "calf", "ankle_pitch", "ankle_roll")]
+    lib = build_stance_library(str(ASSET_XML), names, n=6, seed=1)
+    self.assertEqual(lib["dof_pos"].shape, (6, 12))
+    self.assertTrue(((lib["offset"][..., 0] >= 0.02) & (lib["offset"][..., 0] <= 0.08)).all())
+    self.assertTrue(((lib["base_xyz"][:, 2] > 0.3) & (lib["base_xyz"][:, 2] < 0.36)).all())
+
   def test_swing_credit_window(self):
     credit = geo.swing_credit(torch.tensor([0.1, 0.3, 0.4, 0.6]), 0.3, 0.5)
     self.assertTrue(torch.allclose(credit, torch.tensor([1.0, 1.0, 0.5, 0.0])))
@@ -248,6 +263,13 @@ class GeometryTests(unittest.TestCase):
 
 
 class TerminationTests(unittest.TestCase):
+  def test_drag_termination_is_off_until_curriculum_then_tightens(self):
+    env = object.__new__(StagedRecoveryEnv)
+    env.cfg = StagedRecoveryCfg()
+    for strength, expected in ((0.0, math.inf), (0.5, 0.13), (1.0, 0.06)):
+      env._penalty_curriculum_strength = lambda s=strength: torch.tensor(s)
+      self.assertAlmostEqual(env.drag_termination_limit().item(), expected, places=5)
+
   def test_velocity_termination_is_off_until_curriculum_then_tightens(self):
     env = object.__new__(StagedRecoveryEnv)
     env.cfg = StagedRecoveryCfg()
@@ -284,7 +306,8 @@ class ConfigTests(unittest.TestCase):
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
                  "style_one_foot_rise", "style_rise_speed", "target_torso_center_over_feet",
                  "target_com_support_margin", "target_sole_contact_coverage", "style_loaded_foot_translation",
-                 "style_standing_foot_anchor", "target_stance_return", "target_stable_standing"):
+                 "style_standing_foot_anchor", "target_stance_return", "target_stable_standing",
+                 "target_step_placement"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
@@ -301,7 +324,7 @@ class ConfigTests(unittest.TestCase):
       "target_torso_center_over_feet": 4.0, "target_com_support": 6.0,
       "target_com_support_margin": 2.0, "target_stable_standing": -1.0,
       "style_loaded_foot_translation": -4.0, "style_loaded_sole_slip": -6.0,
-      "style_standing_foot_anchor": -4.0, "target_stance_return": 4.0,
+      "style_standing_foot_anchor": -4.0, "target_stance_return": 4.0, "target_step_placement": 100.0,
     }
     for name, value in expected.items():
       self.assertEqual(getattr(s, name), value, name)
@@ -310,6 +333,8 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(StagedRecoveryCfg.staged.stance_rise_fraction, 0.25)
     self.assertEqual(StagedRecoveryCfg.staged.revision, "6a")
     self.assertFalse(hasattr(StagedRecoveryCfg.staged, "ready_com_centre_sigma_m"))
+    st = StagedRecoveryCfg.staged
+    self.assertEqual((st.stance_start_prob, st.drag_termination_start_m, st.drag_termination_final_m), (0.15, 0.20, 0.06))
     active = [n for n in dir(s) if not n.startswith("_") and getattr(s, n) != 0]
     functions = [n.split("_", 1)[1] for n in active]
     self.assertEqual(len(functions), len(set(functions)), "a reward function is registered twice")
