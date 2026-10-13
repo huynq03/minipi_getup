@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import torch
 from mjlab.sensor import ContactMatch, ContactSensor, ContactSensorCfg
 
 from minipi_getup.host.env import torch_rand_float
 from minipi_getup.host_safe_recovery.env import (
   SafeRecoveryEnv,
+  _loaded_coverage_deficit,
   _saturating_support,
   _sole_tilt_cost,
 )
 from minipi_getup.host_staged_recovery import geometry as geo
 from minipi_getup.host_staged_recovery.asset import ASSET_XML
-from minipi_getup.host_staged_recovery.squat_poses import build_squat_library
+from minipi_getup.host_staged_recovery.stance_poses import build_stance_library
 
 LEG_CONTACT_SENSOR = "staged_leg_leg_contact"
 
@@ -79,6 +79,54 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.lift_gate = zeros()
     self.ready = zeros()
     self.two_foot = zeros()
+    self.sole_cov = zeros(2)
+    self.coverage_pair = zeros()
+    self.support_gate = zeros()
+    self.com_margin = zeros()
+    self.torso_lat_err = zeros()
+    self.ep_stand_min_cov = zeros()
+    self.ep_stand_cov90 = zeros()
+    self.ep_stand_torso_err = zeros()
+    self.ep_stand_margin = zeros()
+    self.ep_stand_margin_steps = zeros()
+    # Loaded foot translation.
+    self.sole_xy_prev = zeros(2, 2)
+    self.sole_xy_valid = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.foot_speed_xy = zeros(2)
+    self.sole_clearance = zeros(2)
+    self.foot_hold = zeros(2)
+    self.ep_peak_hip_roll = zeros()
+    self.ep_translation_cost = zeros()
+    self.ep_actuated_steps = zeros()
+    self.ep_drag_dist = zeros(2)
+    self.ep_move_load = zeros(2)
+    self.ep_move_steps = zeros(2)
+    # After standing: anchors, swing exemption and stance return.
+    self.leg_joint_mask = torch.stack([
+      torch.tensor([j.startswith(f"{s}_") for j in self.dof_names], device=dev, dtype=torch.float32)
+      for s in ("l", "r")
+    ])  # (2, num_dof)
+    self.foot_anchor = zeros(2, 2)
+    self.anchor_valid = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.foot_lifted = torch.zeros(n, 2, dtype=torch.bool, device=dev)
+    self.foot_air_time = zeros(2)
+    self.foot_down_time = zeros(2)
+    self.swing_exempt = zeros(2)
+    self.stance_err = zeros(2)
+    self.ep_swing_exempt_time = zeros()
+    self.ep_standing_lifts = zeros()
+    self.ep_anchor_drift = zeros()
+    self.ep_stance_err = zeros()
+    self.lift_err = zeros(2)  # stance error when the foot was last lifted
+    self.step_gain = zeros()  # this step's touchdown improvement (scored by the reward)
+    self.ep_step_gain = zeros()
+    self.ep_post_drag = zeros(2)  # loaded travel per foot while fully standing
+    self.drag_out = torch.zeros(n, dtype=torch.bool, device=dev)
+    # Stance starts: displaced standing stances (IK library), actuated at once.
+    self.stance_start = torch.zeros(n, dtype=torch.bool, device=dev)
+    self.saved_force = self.force.clone()
+    lib = build_stance_library(str(ASSET_XML), list(self.dof_names), n=self.cfg.staged.stance_start_poses)
+    self.stance_lib = {k: torch.tensor(v, dtype=torch.float, device=dev) for k, v in lib.items()}
     self.ep_ready_before_rise = torch.zeros(n, dtype=torch.bool, device=dev)
     self.rise_gate = zeros()
     self.ep_rise_steps = zeros()
@@ -98,27 +146,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.actuated_peak_vel = zeros()
     self.step_peak_qd = zeros(self.num_dof)
     self.overspeed_out = torch.zeros(n, dtype=torch.bool, device=dev)
-    self.two_foot_flat = zeros()
-    self.prev_sole_xy = zeros(2, 2)
-    self.foot_prev_valid = torch.zeros(n, dtype=torch.bool, device=dev)
-    self.foot_vel_xy = zeros(2, 2)
-    self.foot_air_time = zeros(2)
-    self.foot_down_time = zeros(2)
-    self.ep_swing_exempt_time = zeros()
-    self.foot_offset = zeros(2)
-    self.squat_start = torch.zeros(n, dtype=torch.bool, device=dev)
-    self.saved_force = self.force.clone()
-    lib = build_squat_library(
-      str(ASSET_XML), list(self.dof_names),
-      calves=np.linspace(*self.cfg.staged.squat_start_calf_range, 15),
-    )
-    self.squat_lib = {k: torch.tensor(v, dtype=torch.float, device=dev) for k, v in lib.items()}
-    self.swing_exempt = zeros()
-    self.lateral = zeros(2)
-    self.prev_base_h = zeros()
-    self.base_vz = zeros()
-    self.improper_steps = zeros()
-    self.improper_out = torch.zeros(n, dtype=torch.bool, device=dev)
 
   # ------------------------------------------------------------------ geometry
   def _update_stage_state(self):
@@ -128,37 +155,90 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     vz = (self.com_w[:, 2] - self.com_prev[:, 2]) / self.dt
     self.com_vz[:] = torch.where(self.com_prev_valid, vz, torch.zeros_like(vz))
     self.com_prev.copy_(self.com_w)
-    h_now = self.root_states[:, 2]
-    self.base_vz[:] = torch.where(self.com_prev_valid, (h_now - self.prev_base_h) / self.dt, torch.zeros_like(h_now))
-    self.prev_base_h.copy_(h_now)
     self.com_prev_valid.fill_(True)
 
     foot_pos = d.body_link_pos_w[:, self.sole_body_indices]
     foot_quat = d.body_link_quat_w[:, self.sole_body_indices]
     corners = geo.sole_corners_world(foot_pos, foot_quat)
     self.sole_centres[:] = corners.mean(2)
+    # Horizontal sole-centre speed over the last policy step, and sole clearance.
     xy = self.sole_centres[..., :2]
-    valid = self.foot_prev_valid[:, None, None]
-    self.foot_vel_xy[:] = torch.where(valid, (xy - self.prev_sole_xy) / self.dt, torch.zeros_like(xy))
-    self.prev_sole_xy.copy_(xy)
-    self.foot_prev_valid.fill_(True)
+    speed = torch.linalg.vector_norm(xy - self.sole_xy_prev, dim=-1) / self.dt
+    self.foot_speed_xy[:] = torch.where(self.sole_xy_valid[:, None], speed, torch.zeros_like(speed))
+    self.sole_xy_prev.copy_(xy)
+    self.sole_xy_valid.fill_(True)
+    self.sole_clearance[:] = geo.sole_strip_points_world(foot_pos, foot_quat)[..., 2].amin(-1)
+    # Lifted feet, anchors and the default place of each foot (standing step adjustment).
+    force_l0, force_r0, _ = self._ground_support_forces()
+    forces = torch.stack((force_l0, force_r0), dim=1)
+    w = weight_of(self)[:, None]
+    was_lifted = self.foot_lifted.clone()
+    self.foot_lifted[:] = (self.sole_clearance >= cfg.lift_clearance_m) & (forces < cfg.lift_unloaded_weight_fraction * w)
+    standing_now = (self.root_states[:, 2] > cfg.anchor_stand_height_m) & (
+      -self.projected_gravity[:, 2] > cfg.anchor_stand_upright
+    )
+    self.ep_standing_lifts += (self.foot_lifted & ~was_lifted & standing_now[:, None]).float().sum(dim=1)
+    # A fresh episode (stance starts begin already standing) anchors where the feet are.
+    follow = self.foot_lifted | ~standing_now[:, None] | ~self.anchor_valid[:, None]
+    self.foot_anchor[:] = geo.foot_anchor_update(self.foot_anchor, xy, follow)
+    self.anchor_valid.fill_(True)
+    lateral = geo.lateral_axis(self.root_states[:, 3:7], foot_quat)
+    forward = torch.stack((lateral[:, 1], -lateral[:, 0]), dim=-1)
+    self.stance_err[:] = geo.stance_offset_error(
+      xy, d.body_link_pos_w[:, self.hip_body_indices, :2], forward, lateral,
+      cfg.stance_default_out_m, cfg.stance_default_fwd_m,
+    )
+    actuated_f = (self.real_episode_length_buf > self.unactuated_time)[:, None]
+    planted = forces >= cfg.swing_touchdown_weight_fraction * w
+    self.foot_down_time[:] = torch.where(planted, self.foot_down_time + self.dt, torch.zeros_like(self.foot_down_time))
+    # The swing timer grows while lifted, restarts only after a real touchdown, and
+    # is frozen during brief taps (no repeated short lifts to stay on one foot).
+    held = self.foot_down_time >= cfg.swing_touchdown_hold_s
+    self.foot_air_time[:] = torch.where(
+      self.foot_lifted & actuated_f, self.foot_air_time + self.dt,
+      torch.where(held | ~actuated_f, torch.zeros_like(self.foot_air_time), self.foot_air_time),
+    )
+    budget_left = (self.ep_swing_exempt_time < cfg.swing_budget_s).float()[:, None]
+    other_down = self.foot_lifted.flip(1).logical_not().float()
+    self.swing_exempt[:] = (
+      geo.swing_credit(self.foot_air_time, cfg.swing_free_s, cfg.swing_max_s) * self.foot_lifted * other_down * budget_left
+    )
+    self.ep_swing_exempt_time += self.swing_exempt.max(dim=1).values * self.dt * standing_now
+    self.foot_hold[:] = geo.contact_load_hold(
+      self.foot_hold, self.support_memory, self.sole_clearance < cfg.foot_translation_contact_clearance_m,
+      math.exp(-self.dt / cfg.foot_translation_hold_decay_s),
+    )
+    # Steps while standing: stance error at lift-off vs at touchdown (signed, so
+    # stepping out and back in nets zero).
+    lift_off = self.foot_lifted & ~was_lifted
+    touchdown = was_lifted & ~self.foot_lifted & standing_now[:, None]
+    self.lift_err[:] = torch.where(lift_off, self.stance_err, self.lift_err)
+    gain = geo.step_placement_gain(self.lift_err, self.stance_err, cfg.step_gain_scale_m, cfg.step_gain_cap)
+    self.step_gain[:] = (gain * touchdown).sum(dim=1)
+    self.ep_step_gain += self.step_gain
+    # Loaded sliding while fully standing (escalates the anchor cost, may terminate):
+    # a foot on the ground carrying >= the lift threshold of the weight, i.e. any
+    # foot that is not lifted, as soon as it moves (no settling delay).
+    sliding = (self.sole_clearance < cfg.foot_translation_contact_clearance_m) & (
+      forces >= cfg.lift_unloaded_weight_fraction * w
+    )
+    self.ep_post_drag += self.foot_speed_xy * self.dt * sliding * standing_now[:, None]
     left, right, _ = self._normalized_supports()
     load = torch.stack((left, right), dim=1)
     valid = (corners[..., 2] < cfg.corner_contact_height_m) & (load[:, :, None] > cfg.support_foot_min)
-    outside, centre, any_valid = geo.support_polygon_distance(
-      self.com_w[:, :2], corners[..., :2].reshape(-1, 8, 2), valid.reshape(-1, 8)
+    outside, centre, any_valid, margin = geo.support_polygon_distance(
+      self.com_w[:, :2], corners[..., :2].reshape(-1, 8, 2), valid.reshape(-1, 8), with_margin=True
     )
     self.com_outside[:] = torch.where(any_valid, outside, torch.full_like(outside, math.nan))
+    self.com_margin[:] = torch.where(any_valid, margin, torch.full_like(margin, math.nan))
     self.com_centre[:] = centre
     self.com_score[:] = geo.com_support_score(
       outside, centre, any_valid, cfg.com_support_sigma_m, cfg.com_centre_sigma_m
     )
     delta = self.sole_centres[:, 0, :2] - self.sole_centres[:, 1, :2]
     self.stance_width[:] = torch.linalg.vector_norm(delta, dim=-1)
-    self.lateral[:] = geo.lateral_axis(self.root_states[:, 3:7], foot_quat)
-    self.foot_gap[:] = geo.foot_lateral_gap(corners, self.lateral)
-    hip_xy = d.body_link_pos_w[:, self.hip_body_indices, :2]
-    self.foot_offset[:] = geo.foot_outward_offset(self.sole_centres[..., :2], hip_xy, self.lateral)
+    self.foot_gap[:] = geo.foot_lateral_gap(corners, lateral)
+    self.torso_lat_err[:] = geo.torso_lateral_error(self.root_states[:, :2], self.sole_centres[..., :2], lateral)
     self.foot_flat[:] = 1.0 - _sole_tilt_cost(foot_quat, self.cfg.safe_recovery.sole_tilt_sigma_rad)
     self.lift_gate[:] = torch.sigmoid(
       (self.root_states[:, 2] - cfg.lift_gate_height_center) / cfg.lift_gate_height_width
@@ -184,33 +264,13 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
     force_l, force_r, _ = self._ground_support_forces()
     self.two_foot[:] = geo.two_foot_share_score(force_l, force_r, cfg.two_foot_full_share)
-    # Both feet loaded AND flat: a foot propped on its edge or toe does not count.
-    self.two_foot_flat[:] = self.two_foot * self.foot_flat.min(dim=1).values
-    # Short swings: a foot off the ground briefly to be re-placed.
-    forces = torch.stack((force_l, force_r), 1)
-    w = weight_of(self)[:, None]
-    unloaded = forces < cfg.swing_unloaded_weight_fraction * w
-    planted = forces >= cfg.swing_touchdown_weight_fraction * w
-    actuated = (self.real_episode_length_buf > self.unactuated_time)[:, None]
-    self.foot_down_time[:] = torch.where(planted, self.foot_down_time + self.dt, torch.zeros_like(self.foot_down_time))
-    # The swing timer grows while lifted, restarts only after a real touchdown
-    # (held swing_touchdown_hold_s), and is frozen during brief taps.
-    held = self.foot_down_time >= cfg.swing_touchdown_hold_s
-    self.foot_air_time[:] = torch.where(
-      unloaded & actuated, self.foot_air_time + self.dt,
-      torch.where(held | ~actuated, torch.zeros_like(self.foot_air_time), self.foot_air_time),
+    # Revision 13: sole coverage computed once per step and shared by the rewards.
+    self.sole_cov[:] = self._sole_coverage()
+    self.coverage_pair[:] = geo.coverage_pair_score(
+      self.sole_cov[:, 0], self.sole_cov[:, 1], cfg.coverage_pair_mean_weight
     )
-    credit = geo.swing_credit(self.foot_air_time, cfg.swing_free_s, cfg.swing_max_s) * unloaded
-    budget_left = (self.ep_swing_exempt_time < cfg.swing_budget_s).float()
-    self.swing_exempt[:] = credit.max(dim=1).values * (~unloaded).any(dim=1) * budget_left  # other foot stands
-    self.ep_swing_exempt_time += self.swing_exempt * self.dt
-    self.ready[:] = geo.rise_ready_score(
-      self._reward_feet_under_com(),
-      self.two_foot,
-      self.foot_flat.min(dim=1).values,
-      self.com_score,
-      geo.com_centred_score(self.com_centre, cfg.ready_com_centre_sigma_m),
-    )
+    self.support_gate[:] = geo.two_foot_support_gate(self.two_foot, torch.maximum(left, right))
+    self.ready[:] = geo.rise_ready_score(self.coverage_pair, self.com_score, self.support_gate)
     self._update_stage_monitors(load)
 
   def _update_stage_monitors(self, load):
@@ -238,13 +298,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       (h - cfg.rise_gate_height_center) / cfg.rise_gate_height_width
     ) * (1.0 - self._standing_gate())
     rising = actuated & ~self.ever_stood & (h >= cfg.rise_gate_height_center)
-    band = actuated & ~self.ever_stood & (h > cfg.improper_rise_height_m)
-    two_min, com_max, _ = self.improper_rise_thresholds()
-    com_ok = torch.nan_to_num(self.com_outside, nan=math.inf) <= com_max
-    # A short re-placing step on one flat loaded foot with the COM over it is proper too.
-    stepping = (self.swing_exempt > 0.5) & (self.foot_flat.max(dim=1).values > 0.5)
-    proper = ((self.two_foot_flat >= two_min) | stepping) & com_ok
-    self.improper_steps[:] = torch.where(band & ~proper, self.improper_steps + 1.0, torch.zeros_like(h))
     weight = weight_of(self)
     fl, fr, _ = self._ground_support_forces()
     on_l, on_r = fl > 0.1 * weight, fr > 0.1 * weight
@@ -262,6 +315,28 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     calf = self.dof_pos[:, self.knee_contact_indices]
     self.ep_knee_extended_standing += (standing & (calf < -cfg.knee_extension_soft_rad).any(1)).float()
     self.ep_knee_reversed_standing += (standing & (calf < cfg.knee_straight_rad).any(1)).float()
+    min_cov = self.sole_cov.min(dim=1).values
+    self.ep_stand_min_cov += min_cov * standing
+    self.ep_stand_cov90 += ((min_cov >= 0.9) & standing).float()
+    self.ep_stand_torso_err += self.torso_lat_err * standing
+    margin_ok = standing & torch.isfinite(self.com_margin)
+    self.ep_stand_margin += torch.where(margin_ok, self.com_margin, torch.zeros_like(self.com_margin))
+    self.ep_stand_margin_steps += margin_ok.float()
+    outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor([1.0, -1.0], device=self.device)
+    self.ep_peak_hip_roll[:] = torch.maximum(self.ep_peak_hip_roll, outward.max(dim=1).values * actuated)
+    self.ep_translation_cost += self._reward_loaded_foot_translation()
+    self.ep_actuated_steps += actuated.float()
+    held = (self.foot_hold > 0.5) & actuated[:, None]
+    self.ep_drag_dist += self.foot_speed_xy * self.dt * held
+    moving = (self.foot_speed_xy > cfg.foot_translation_threshold_m_s) & actuated[:, None] & (
+      self.sole_clearance < cfg.foot_translation_contact_clearance_m
+    )
+    self.ep_move_load += torch.stack((fl, fr), dim=1) / weight[:, None] * moving
+    self.ep_move_steps += moving.float()
+    self.ep_anchor_drift += torch.linalg.vector_norm(
+      self.sole_centres[..., :2] - self.foot_anchor, dim=-1
+    ).mean(dim=1) * standing
+    self.ep_stance_err += self.stance_err.mean(dim=1) * standing
     err_mask = actuated & (self.lift_gate > 0.5) & torch.isfinite(self.com_outside)
     self.ep_com_err += torch.where(err_mask, self.com_outside, torch.zeros_like(self.com_outside))
     self.ep_com_err_steps += err_mask.float()
@@ -285,25 +360,19 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     if not self.cfg.staged.velocity_termination:
       self.overspeed_out[:] = False
     self.reset_buf |= self.overspeed_out
-    self.improper_out = self.improper_rise_out() & ~self.overspeed_out
-    self.reset_buf |= self.improper_out
+    # Too much loaded sliding after standing ends the episode (training only).
+    self.drag_out = self.ep_post_drag.max(dim=1).values > self.drag_termination_limit()
+    if not self.cfg.staged.drag_termination:
+      self.drag_out[:] = False
+    self.reset_buf |= self.drag_out
 
-  def improper_rise_thresholds(self):
-    """(min two-foot-flat score, max COM distance outside the support, steps),
-    interpolated from start to final by the penalty curriculum strength."""
+  def drag_termination_limit(self) -> torch.Tensor:
+    """Post-stand loaded sliding allowed per foot: off (inf) until the success
+    curriculum starts, then start -> final metres as it completes."""
     cfg = self.cfg.staged
     s = self._penalty_curriculum_strength()
-    lerp = lambda pair: pair[0] + s * (pair[1] - pair[0])  # noqa: E731
-    return lerp(cfg.improper_rise_two_foot_min), lerp(cfg.improper_rise_com_outside_m), torch.round(
-      lerp(cfg.improper_rise_steps)
-    )
-
-  def improper_rise_out(self) -> torch.Tensor:
-    """Rising without two flat loaded feet or with the COM outside the support
-    for the required steps; active once the penalty curriculum starts."""
-    _, _, steps = self.improper_rise_thresholds()
-    out = (self.improper_steps >= steps) & (self._penalty_curriculum_strength() > 0)
-    return out & self.cfg.staged.improper_rise_termination
+    limit = cfg.drag_termination_start_m + s * (cfg.drag_termination_final_m - cfg.drag_termination_start_m)
+    return torch.where(s > 0, limit, torch.full_like(limit, math.inf))
 
   def compute_reward(self):
     self._update_stage_state()
@@ -323,11 +392,49 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     # earns almost nothing (one-foot standing), an even split earns 1.
     left, right, _ = self._normalized_supports()
     loaded = torch.maximum(left, right)
-    return self.two_foot * loaded * self.foot_flat[:, 0] * self.foot_flat[:, 1]
+    flat = self.foot_flat[:, 0] * self.foot_flat[:, 1]
+    return self.two_foot * loaded * flat * self.sole_cov.min(dim=1).values
 
   def _reward_com_support(self):
-    # COM over the support of both flat feet: one-foot balance does not count.
-    return self.com_score * self.two_foot_flat * self.lift_gate
+    # COM over the support of both feet: one-foot balance does not count.
+    return self.com_score * self.two_foot * self.lift_gate
+
+  def _sole_coverage(self):
+    """Geometric sole coverage (N, 2), [left, right]; replaces host_safe_recovery's
+    force-strip coverage everywhere (coverage reward, coverage deficit, readiness)."""
+    cfg = self.cfg.staged
+    d = self.robot.data
+    points = geo.sole_strip_points_world(
+      d.body_link_pos_w[:, self.sole_body_indices], d.body_link_quat_w[:, self.sole_body_indices]
+    )
+    force_l, force_r, _ = self._ground_support_forces()
+    gate = _saturating_support(
+      torch.stack((force_l, force_r), dim=1), weight_of(self)[:, None],
+      cfg.sole_coverage_load_deadband_weight_fraction, cfg.sole_coverage_load_scale_weight_fraction,
+    )
+    return geo.geometric_sole_coverage(points[..., 2], gate, cfg.sole_coverage_tolerance_m)
+
+  def _reward_sole_contact_coverage(self):
+    # Replaces host_safe_recovery's 0.5*mean + 0.5*product: mostly the worse sole.
+    # Contact-based, so it pays only for soles on the ground (no early restriction).
+    return self.coverage_pair
+
+  def _reward_loaded_foot_translation(self):
+    cfg = self.cfg.staged
+    actuated = (self.real_episode_length_buf > self.unactuated_time).float()
+    return geo.foot_translation_cost(
+      self.foot_speed_xy, self.foot_hold, cfg.foot_translation_threshold_m_s, cfg.foot_translation_scale_m_s
+    ) * actuated
+
+  def _reward_torso_center_over_feet(self):
+    cfg = self.cfg.staged
+    centred = torch.exp(-(self.torso_lat_err / cfg.torso_center_sigma_m).square())
+    return self.support_gate * self.lift_gate * centred
+
+  def _reward_com_support_margin(self):
+    # Small bonus for the COM inside the two-foot support polygon with margin.
+    margin = geo.com_margin_score(self.com_margin, self.cfg.staged.com_margin_full_m)
+    return self.support_gate * self.lift_gate * margin
 
   def _reward_stance_width(self):
     cfg = self.cfg.staged
@@ -337,7 +444,26 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       cfg.stance_gap_scale_m, cfg.stance_width_scale_m, cfg.stance_cost_cap,
     )
     # Gate on either foot: one foot resting on or crossing the other also pays.
-    return cost * torch.maximum(left, right) * self.lift_gate
+    # Relaxed while rising so a second foot may land close and be adjusted later;
+    # full once standing (revision 13).
+    phase = cfg.stance_rise_fraction + (1.0 - cfg.stance_rise_fraction) * self._standing_gate()
+    return cost * torch.maximum(left, right) * self.lift_gate * phase
+
+  def _settled_foot_load(self):
+    """Per-foot load weight for sole-quality costs: current normalized support
+    times support_memory, so a foot that has just touched down is not charged
+    in full before it can settle (revision 13)."""
+    left, right, _ = self._normalized_supports()
+    return torch.stack((left, right), dim=1) * self.support_memory
+
+  def _reward_loaded_sole_coverage_deficit(self):
+    return _loaded_coverage_deficit(
+      self.sole_cov, self._settled_foot_load(), self.cfg.safe_recovery.loaded_sole_min_coverage
+    )
+
+  def _reward_loaded_sole_tilt(self):
+    # foot_flat = 1 - tilt cost (same sigma as host_safe_recovery).
+    return (self._settled_foot_load() * (1.0 - self.foot_flat)).mean(dim=1)
 
   def _reward_unsupported_ascent(self):
     cfg = self.cfg.staged
@@ -369,69 +495,49 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       self.com_vz, cfg.rise_speed_threshold_m_s, cfg.rise_speed_scale_m_s, cfg.rise_speed_cost_cap
     ) * actuated
 
-  def _feet_credit(self):
-    # 1 while sitting/kneeling; above feet_first_height_m it needs two flat feet.
-    cfg = self.cfg.staged
-    floor = cfg.orientation_feet_credit_floor
-    high = torch.sigmoid((self.root_states[:, 2] - cfg.feet_first_height_m) / cfg.feet_first_height_width_m)
-    return 1.0 - high * (1.0 - floor) * (1.0 - self.two_foot_flat)
-
-  def _reward_orientation(self):
-    # Feet first: an upright torso pays only once both flat feet carry the load.
-    return super()._reward_orientation() * self._feet_credit()
-
-  def _reward_target_orientation(self):
-    return super()._reward_target_orientation() * self._feet_credit()
-
-  def _reward_ground_parallel(self):
-    # Feet parallel to the ground count when they are on it, not in the air.
-    return super()._reward_ground_parallel() * self._feet_credit()
-
-  def _reward_torso_lift_without_feet(self):
-    cfg = self.cfg.staged
-    actuated = self.real_episode_length_buf > self.unactuated_time
-    high = torch.sigmoid((self.root_states[:, 2] - cfg.torso_lift_height_m) / cfg.torso_lift_height_width_m)
-    gate = (actuated & ~self.ever_stood).float() * high
-    return geo.torso_lift_cost(
-      self.base_vz, self.two_foot_flat, gate,
-      cfg.torso_lift_vz_threshold_m_s, cfg.torso_lift_vz_scale_m_s, cfg.torso_lift_cost_cap,
-    )
-
   def _reward_one_foot_rise(self):
     left, right, _ = self._normalized_supports()
-    cost = geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot_flat, self.rise_gate)
-    return cost * (1.0 - self.swing_exempt)
-
-  def _reward_narrow_squat_support(self):
-    # While rising: both flat soles loaded right under the hips, COM over them.
-    cfg = self.cfg.staged
-    under = torch.exp(-((self.foot_offset - cfg.narrow_squat_offset_m) / cfg.narrow_squat_sigma_m).square()).mean(-1)
-    return self.two_foot_flat * under * self.com_score * self.rise_gate
-
-  def _reward_loaded_foot_splay(self):
-    cfg = self.cfg.staged
-    left, right, _ = self._normalized_supports()
-    actuated = (self.real_episode_length_buf > self.unactuated_time).float()
-    weight = torch.stack((left, right), 1) * self.foot_flat * actuated[:, None]
-    return geo.foot_splay_cost(self.foot_offset, weight, cfg.foot_splay_free_m, cfg.foot_splay_scale_m, cfg.foot_splay_cost_cap)
-
-  def _reward_loaded_foot_drag(self):
-    cfg = self.cfg.staged
-    left, right, _ = self._normalized_supports()
-    actuated = (self.real_episode_length_buf > self.unactuated_time).float()
-    weight = torch.stack((left, right), 1) * self.foot_flat * actuated[:, None]
-    return geo.foot_drag_cost(
-      self.foot_vel_xy, self.lateral, weight, cfg.foot_drag_deadband_m_s, cfg.foot_drag_scale_m_s,
-      cfg.foot_drag_lateral_gain, cfg.foot_drag_cost_cap,
-    )
+    return geo.one_foot_rise_cost(torch.maximum(left, right), self.two_foot, self.rise_gate)
 
   def _reward_standing_load_imbalance(self):
     left, right, _ = self._ground_support_forces()
     body_ids = self.robot.indexing.body_ids.long()
     weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
     cost = geo.load_imbalance_cost(left, right, weight, self.cfg.staged.load_imbalance_floor_weight_fraction)
-    # A short step (other foot briefly lifted to be re-placed) is exempt.
-    return cost * self._standing_gate() * (1.0 - self.swing_exempt)
+    # A short step (one foot lifted, the other planted) is exempt.
+    return cost * self._standing_gate() * (1.0 - self.swing_exempt.max(dim=1).values)
+
+  def _reward_stable_standing(self):
+    # host_safe_recovery's standing motion cost, without the joints of a leg that
+    # is in an exempt short swing (its own motion is the step).
+    sr = self.cfg.safe_recovery
+    mask = 1.0 - self.swing_exempt @ self.leg_joint_mask  # (N, num_dof)
+    motion = sr.stable_joint_velocity_weight * (mask * self.dof_vel.square()).sum(1) / self.num_dof
+    motion += sr.stable_base_angular_velocity_weight * self.base_ang_vel.square().sum(1)
+    boost = self._standing_penalty_boost(sr.standing_motion_penalty_multiplier)
+    return boost * self._standing_gate() * motion
+
+  def _reward_standing_foot_anchor(self):
+    cfg = self.cfg.staged
+    cost = geo.foot_anchor_cost(
+      self.sole_centres[..., :2], self.foot_anchor, self.foot_hold,
+      cfg.anchor_deadband_m, cfg.anchor_scale_m, cfg.anchor_cost_cap,
+    )
+    # Escalates with the episode's accumulated loaded sliding: a policy that keeps
+    # sliding pays more and more.
+    escalation = 1.0 + self.ep_post_drag.max(dim=1).values / cfg.anchor_escalation_m
+    return cost * escalation * self._standing_gate()
+
+  def _reward_step_placement(self):
+    # Impulse at touchdown: stance error removed by this step (negative if worse).
+    return self.step_gain
+
+  def _reward_stance_return(self):
+    # Each planted foot near its default place under its hip (task space).
+    cfg = self.cfg.staged
+    planted = (self.sole_clearance < cfg.foot_translation_contact_clearance_m).float()
+    near = geo.stance_return_score(self.stance_err, cfg.stance_return_sigma_m)
+    return self._standing_gate() * (planted * near).mean(dim=1)
 
   def _reward_knee_load_support(self):
     cfg = self.cfg.staged
@@ -441,8 +547,10 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     return super()._reward_knee_load_support() * ramp
 
   def _com_height_credit(self):
-    floor = self.cfg.staged.height_credit_com_floor
-    return floor + (1.0 - floor) * self.ready
+    # Intermediate step (revision 13): both feet carrying load already earns part
+    # of the credit; the rest needs the full readiness (planted soles, COM support).
+    cfg = self.cfg.staged
+    return geo.height_credit(self.support_gate, self.ready, cfg.height_credit_com_floor, cfg.height_credit_two_foot_weight)
 
   def _knee_height_credit(self):
     # Used by head height (task) and target base height: rising credit needs the
@@ -478,37 +586,38 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.actuated_peak_vel = torch.maximum(self.actuated_peak_vel, peak)
 
   # ------------------------------------------------------------------ resets
+  def update_force_curriculum(self, env_ids):
+    super().update_force_curriculum(env_ids)
+    floor = self.cfg.staged.action_scale_floor
+    self.action_rescale[env_ids] = self.action_rescale[env_ids].clamp_min(floor)
+
   def _penalty_ema_ids(self, env_ids):
-    # Squat starts stand up easily; they must not advance the curriculum.
-    return env_ids[~self.squat_start[env_ids]]
+    # Stance starts begin on their feet; they must not advance the curriculum.
+    return env_ids[~self.stance_start[env_ids]]
 
   def _reset_root_states(self, env_ids):
     super()._reset_root_states(env_ids)
     cfg = self.cfg.staged
-    pick = torch.rand(len(env_ids), device=self.device) < cfg.squat_start_prob
-    self.squat_start[env_ids] = pick
+    pick = torch.rand(len(env_ids), device=self.device) < cfg.stance_start_prob
+    self.stance_start[env_ids] = pick
     ids = env_ids[pick]
     n = len(ids)
     if not n:
       return
-    lib = self.squat_lib
-    k = torch.randint(0, len(lib["base_z"]), (n,), device=self.device)
+    lib = self.stance_lib
+    k = torch.randint(0, len(lib["base_xyz"]), (n,), device=self.device)
     lower = self.robot.data.joint_pos_limits[0, :, 0]
     upper = self.robot.data.joint_pos_limits[0, :, 1]
-    q = lib["dof_pos"][k] + torch_rand_float(-1.0, 1.0, (n, self.num_dof), self.device) * cfg.squat_start_joint_noise_rad
+    q = lib["dof_pos"][k] + torch_rand_float(-1.0, 1.0, (n, self.num_dof), self.device) * cfg.stance_start_joint_noise_rad
     self.dof_pos[ids] = torch.maximum(torch.minimum(q, upper - 0.01), lower + 0.01)
     self.dof_vel[ids] = 0.0
     self.robot.write_joint_state_to_sim(self.dof_pos[ids], self.dof_vel[ids], env_ids=ids)
-    pitch = lib["base_pitch"][k]
     yaw = torch_rand_float(-math.pi, math.pi, (n,), self.device).squeeze(-1)
-    # q = yaw(z) * pitch(y), wxyz
-    cy, sy, cp, sp = torch.cos(yaw / 2), torch.sin(yaw / 2), torch.cos(pitch / 2), torch.sin(pitch / 2)
-    quat = torch.stack((cy * cp, -sy * sp, cy * sp, sy * cp), -1)
-    # Library base x is relative to the feet; rotate it with the yaw.
-    bx = lib["base_x"][k]
-    self.root_states[ids, 0] = self.env_origins[ids, 0] + bx * torch.cos(yaw)
-    self.root_states[ids, 1] = self.env_origins[ids, 1] + bx * torch.sin(yaw)
-    self.root_states[ids, 2] = lib["base_z"][k] + 0.002
+    quat = torch.stack((torch.cos(yaw / 2), torch.zeros_like(yaw), torch.zeros_like(yaw), torch.sin(yaw / 2)), -1)
+    bx, by = lib["base_xyz"][k, 0], lib["base_xyz"][k, 1]
+    self.root_states[ids, 0] = self.env_origins[ids, 0] + bx * torch.cos(yaw) - by * torch.sin(yaw)
+    self.root_states[ids, 1] = self.env_origins[ids, 1] + bx * torch.sin(yaw) + by * torch.cos(yaw)
+    self.root_states[ids, 2] = lib["base_xyz"][k, 2] + 0.002
     self.root_states[ids, 3:7] = quat
     self.root_states[ids, 7:13] = 0.0
     self.base_quat[ids] = quat
@@ -538,13 +647,21 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     if not len(env_ids):
       return
     s = self.reset_stats
-    squat = self.squat_start[env_ids]
-    s["squat_start_frac"] = squat.float().mean()
-    s["squat_start_success"] = success_all[squat].float().mean() if squat.any() else torch.tensor(math.nan)
-    s["fallen_success"] = success_all[~squat].float().mean() if (~squat).any() else torch.tensor(math.nan)
-    # Stage and rise metrics below describe fallen starts only.
-    stood = stood_all[~squat]
-    env_ids = env_ids[~squat]
+    stance = self.stance_start[env_ids]
+    s["stance_start_frac"] = stance.float().mean()
+    s["stance_start_success"] = success_all[stance].float().mean() if stance.any() else torch.tensor(math.nan)
+    s["fallen_success"] = success_all[~stance].float().mean() if (~stance).any() else torch.tensor(math.nan)
+    s["term_drag"] = self.drag_out[env_ids].float().mean()
+    s["drag_termination_limit"] = self.drag_termination_limit().reshape(-1)[0]
+    s["post_stand_drag_m"] = self.ep_post_drag[env_ids].max(dim=1).values.mean()
+    s["step_placement_gain"] = self.ep_step_gain[env_ids].mean()
+    if stance.any():
+      st_ids = env_ids[stance]
+      s["stance_start_lifts_per_ep"] = self.ep_standing_lifts[st_ids].mean()
+      s["stance_start_final_err_m"] = self.stance_err[st_ids].mean()
+    # Stage, rise and standing metrics below describe fallen starts only.
+    stood = stood_all[~stance]
+    env_ids = env_ids[~stance]
     if not len(env_ids):
       return
     t_feet, t_com, t_rise = self.t_feet[env_ids], self.t_com[env_ids], self.t_rise[env_ids]
@@ -569,8 +686,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["knee_contact_time_s"] = self.ep_knee_time[env_ids].mean()
     s["leg_contact_time_s"] = self.ep_leg_contact_time[env_ids].mean()
     s["term_overspeed"] = self.overspeed_out[env_ids].float().mean()
-    s["term_improper_rise"] = self.improper_out[env_ids].float().mean()
-    s["swing_exempt_time_s"] = self.ep_swing_exempt_time[env_ids].mean()
     s["velocity_termination_limit"] = self.velocity_termination_limit().reshape(-1)[0]
     steps = self.ep_standing_steps[env_ids].clamp_min(1.0)
     s["knee_extended_standing_frac"] = (self.ep_knee_extended_standing[env_ids] / steps).mean()
@@ -578,6 +693,26 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["standing_min_foot_share"] = (
       self.ep_min_foot_share[env_ids] / self.ep_standing_steps[env_ids].clamp_min(1.0)
     ).mean()
+    s["standing_min_sole_coverage"] = (self.ep_stand_min_cov[env_ids] / steps).mean()
+    s["standing_both_soles_cov90_frac"] = (self.ep_stand_cov90[env_ids] / steps).mean()
+    s["standing_torso_lateral_err_m"] = (self.ep_stand_torso_err[env_ids] / steps).mean()
+    s["standing_com_margin_m"] = (
+      self.ep_stand_margin[env_ids].sum() / self.ep_stand_margin_steps[env_ids].sum().clamp_min(1.0)
+    )
+    s["standing_lifts_per_ep"] = self.ep_standing_lifts[env_ids].mean()
+    s["standing_swing_exempt_s"] = self.ep_swing_exempt_time[env_ids].mean()
+    s["standing_anchor_drift_m"] = (self.ep_anchor_drift[env_ids] / steps).mean()
+    s["standing_stance_offset_err_m"] = (self.ep_stance_err[env_ids] / steps).mean()
+    s["final_stance_offset_err_m"] = self.stance_err[env_ids].mean()
+    s["peak_hip_roll_rad"] = self.ep_peak_hip_roll[env_ids].mean()
+    s["loaded_foot_translation"] = (
+      self.ep_translation_cost[env_ids] / self.ep_actuated_steps[env_ids].clamp_min(1.0)
+    ).mean()
+    s["loaded_drag_dist_left_m"] = self.ep_drag_dist[env_ids, 0].mean()
+    s["loaded_drag_dist_right_m"] = self.ep_drag_dist[env_ids, 1].mean()
+    s["moving_contact_foot_load_w"] = (
+      self.ep_move_load[env_ids].sum() / self.ep_move_steps[env_ids].sum().clamp_min(1.0)
+    )
     s["com_support_error_m"] = (
       self.ep_com_err[env_ids].sum() / self.ep_com_err_steps[env_ids].sum().clamp_min(1.0)
     )
@@ -590,34 +725,38 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
 
   def reset_idx(self, env_ids):
     if len(env_ids):
-      # Give the pull-force curriculum back to envs leaving a squat start.
-      was = env_ids[self.squat_start[env_ids]]
+      # Give the pull-force curriculum back to envs leaving a stance start.
+      was = env_ids[self.stance_start[env_ids]]
       self.force[was] = self.saved_force[was]
     super().reset_idx(env_ids)
     if len(env_ids):
-      # Squat starts: actuated at once (no passive fall) and no pull force.
-      new = env_ids[self.squat_start[env_ids]]
+      # Stance starts: actuated at once (no passive phase) and no pull force.
+      new = env_ids[self.stance_start[env_ids]]
       self.real_episode_length_buf[new] = int(self.unactuated_time) + 1
       self.saved_force[new] = self.force[new]
       self.force[new] = 0.0
       self.com_prev_valid[env_ids] = False
+      self.sole_xy_valid[env_ids] = False
+      self.foot_lifted[env_ids] = False
+      self.anchor_valid[env_ids] = False
       self.knee_time[env_ids] = 0
       for buf in (self.t_feet, self.t_com, self.t_rise):
         buf[env_ids] = -1.0
       self.rise_supported[env_ids] = False
       self.ep_ready_before_rise[env_ids] = False
       self.ep_rise_steps[env_ids] = 0.0
-      self.improper_steps[env_ids] = 0.0
-      self.foot_prev_valid[env_ids] = False
-      self.foot_air_time[env_ids] = 0.0
-      self.foot_down_time[env_ids] = 0.0
-      self.ep_swing_exempt_time[env_ids] = 0.0
-      self.swing_exempt[env_ids] = 0.0
       self.ep_rise_two_foot_steps[env_ids] = 0.0
       self.ep_rise_one_foot_steps[env_ids] = 0.0
       self.prev_height[env_ids] = 0.0
       self.leg_contact_sensor.reset(env_ids)
       for buf in (self.ep_knee_time, self.ep_leg_contact_time, self.ep_min_foot_share, self.ep_knee_extended_standing,
                   self.ep_knee_reversed_standing, self.ep_standing_steps,
-                  self.ep_com_err, self.ep_com_err_steps, self.actuated_peak_vel):
+                  self.ep_com_err, self.ep_com_err_steps, self.actuated_peak_vel,
+                  self.ep_stand_min_cov, self.ep_stand_cov90, self.ep_stand_torso_err,
+                  self.ep_stand_margin, self.ep_stand_margin_steps, self.foot_hold,
+                  self.ep_peak_hip_roll, self.ep_translation_cost, self.ep_actuated_steps,
+                  self.ep_drag_dist, self.ep_move_load, self.ep_move_steps,
+                  self.foot_air_time, self.foot_down_time, self.swing_exempt, self.ep_swing_exempt_time,
+                  self.ep_standing_lifts, self.ep_anchor_drift, self.ep_stance_err,
+                  self.lift_err, self.step_gain, self.ep_step_gain, self.ep_post_drag):
         buf[env_ids] = 0.0

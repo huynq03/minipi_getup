@@ -75,15 +75,15 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 | 1 legs in | `target_feet_under_com` | +3 | mean over feet of `exp(−(relu(‖foot_xy − COM_xy‖ − 0.12)/0.08)²)` | always (also satisfied when standing) |
 | 2 feet down | `target_two_foot_flat_support` | +4 | `share₂ · max(sup_L, sup_R) · flat_L · flat_R`, with `share₂ = clip(min(F_L,F_R)/(F_L+F_R) / 0.3)` and `flat = exp(−(tilt/0.15)²)` | always; one-foot standing (4% share) earns ~0.13 |
 | 2 feet down | `style_stance_width` | −4 | `min(4, (relu(0.04 − gap)/0.03)² + (relu(width − 0.26)/0.08)²) · max(sup_L, sup_R) · lift` | either foot loaded, torso up; a foot resting on or crossing the other also pays |
-| 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · min(flat) · lift` | both feet loaded, torso up |
+| 3 COM transfer | `target_com_support` | +6 | `com_score · share₂ · lift` | both feet loaded, torso up |
 | 4 rise | height credit | × | head height (task), `target_base_height`, `foot_supported_height` × `0.05 + 0.95·ready`, `ready = feet_under_com · share₂ · min(flat) · com_score · exp(−(d_centre/0.03)²)` | always; rising pays fully only after feet are under the COM, both feet are down and the COM is supported; floor 0.05 keeps an early gradient |
-| 4 rise | `style_one_foot_rise` | −20 | `max(sup_L, sup_R) · (1 − share₂·min(flat)) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
+| 4 rise | `style_one_foot_rise` | −20 | `max(sup_L, sup_R) · (1 − share₂) · rise_gate`, `rise_gate = σ((h − 0.10)/0.02) · (1 − standing gate)` | actuated; knee/body support with no foot load is not charged here |
 | 4 rise | `style_unsupported_ascent` | −6 | `(relu(v_z − 0.05)/0.20)² · (1 − ready) · lift` | after actuation starts |
 | 5 standing | `style_standing_knee_extension` | −16 | mean over legs of `standing gate · (relu(−q_calf − 0.25)/0.40)²`: 0 above ~22° flexion, 1.0 at the straight leg, 31.6 at the −2.5 reverse limit | standing only: straight or reversed knees are free while getting up but must return toward the flexed default once standing (static standing at calf 0 needs ~0.6 Nm at the knee) |
 | 2 feet down / 5 | `style_leg_contact` | −6 | `sup_leg(‖F_left-leg↔right-leg‖) · lift`, with `sup_leg` using deadband 0.005W and scale 0.05W (~3.4 N) | after actuation, torso up |
 | 5 standing | `style_standing_load_imbalance` | −6 | `((F_L − F_R)/(F_L + F_R + 0.1W))² · standing gate` | standing; ≈ 0.64 for a 64/4 N split |
 | knee support | `style_knee_load_support` | −45 × ramp | the safe-recovery knee-housing load cost × `0.25 + 0.75·clip(t_knee/0.8 s)` | `t_knee` grows while knee support > 0.1 and decays with τ = 0.3 s otherwise |
-| 4 rise | `style_rise_speed` | −15 | `min((relu(v_z,COM − 0.20)/0.10)², 9)` | actuated; a slow rise (~0.17 m/s) is free |
+| 4 rise | `style_rise_speed` | −4 | `min((relu(v_z,COM − 0.20)/0.10)², 9)` | actuated; a slow rise (~0.17 m/s) is free |
 | velocity | `style_joint_overspeed` | −2.0 | `0.5·mean + 0.5·max` of `relu(peak₅ₘₛ|q̇| − 3)²` × regu ramp (1/3 → 1) | after the success curriculum |
 
 **Knee geometry** (angle between the hip→knee and knee→ankle joint axes):
@@ -220,111 +220,228 @@ and the unsupported-ascent cost were cheaper than a slower two-foot rise.
   - `style_rise_speed` (−4): upward COM speed above 0.2 m/s, so a ~1.5 s rise is free and a ballistic
     0.5 s rise is not.
 
-## Revision 7: rising on two flat feet is enforced
 
-rev-6 `model_600` from supine: the right leg splayed out (hip roll −1.33) and pushed, while the left knee
-was reversed (−1.2) and the left foot propped on its edge/toe with the sole centre ~8 cm up. The force-only
-two-foot share counted that as two feet, and the rise lasts only 0.15–0.3 s, so per-step penalties were
-cheaper than standing up early (COM rose at 0.5–0.75 m/s).
+## Revision 13: planted soles, a centred torso and still standing (from scratch)
 
-- `share₂·min(flat_L, flat_R)` (two loaded *flat* feet) replaces the force-only share in
-  `style_one_foot_rise` and `target_com_support`.
-- **Improper-rise termination** (training only, `improper_rise_termination`): before the first stand,
-  with the base above 0.18 m and the torso up (`−g_z > 0.5`; revision 8: base above 0.12 m **or** torso
-  more than 45° up), the episode ends after N consecutive steps
-  with `share₂·min(flat)` below a minimum or the COM too far outside the support polygon. It switches on
-  with the penalty curriculum (strength s > 0), like the velocity termination, so the robot first learns
-  to stand at all, and tightens with s: minimum 0.15 → 0.5, COM 10 → 3 cm outside, N 15 → 5 steps
-  (0.3 → 0.1 s). With the final thresholds from the start, every rev-6 `model_600` episode in all five
-  orientations was cut (0.55–0.8 s after actuation), leaving no learning signal. Upright kneeling (base ≈ 0.22 m) is cut by it too. Logged as
-  `term_improper_rise`. Evaluation and playback disable it.
-- `style_rise_speed` −4 → −15.
+> **Lineage.** Revision 13 branches from revision 6 (`24fad42`), not from revision 12.
+> Revisions 7–12 (feet-first gating, improper-rise termination, narrow-squat guide and squat starts) are
+> superseded. Their code and notes remain in the history up to `5ecb878`. The training runs of this
+> revision were named `rev6a`, its working name.
 
-## Revision 8: feet first in every orientation
+Rev 6 got up well, but rose on tilted feet (0% of rising steps on two flat soles) and, after resuming
+past ~2000 iterations, oscillated at ~8.5 Hz while standing: joint-speed RMS 0.29 → 2.0 rad/s by
+iteration 6300, as the action scale fell to 0.25. The only standing-motion cost was
+`stable_standing` at −0.05, about −0.1 per episode against a return of ~350. Revision 13 starts
+again from scratch with the changes below. HoST multi-critic PPO, the force and action-scale
+curricula, and every other term are unchanged.
 
-rev-6 `model_700` raised and straightened the torso before the feet were down: from supine the torso was
-upright (−g_z 0.92) at 0.30 s with no foot on the ground, and two flat feet carried the load only from
-~0.66 s at a base height of 0.325 m. Whenever both feet were loaded during the rise, the more tilted foot
-was at a median 67° (edge/toe). The largest reward, the task orientation term (~40 per episode), paid for
-an upright torso whatever supported it, and every feet-related cost started at 0.10–0.14 m.
+`cov_L`, `cov_R` are per-foot sole coverages. They are computed once per step in
+`_update_stage_state`, and the override replaces host_safe_recovery's coverage everywhere, including
+`loaded_sole_coverage_deficit`. Revision 13 defines them **geometrically**:
 
-- **A, feet-gated torso rewards:** `task_orientation`, `target_target_orientation` and
-  `style_ground_parallel` × `0.1 + 0.9·share₂·min(flat)`.
-- **B, `style_torso_lift_without_feet` (−10):**
-  `min((relu(v_z,base − 0.02)/0.10)² + (relu(d(−g_z)/dt − 0.2)/1.0)², 9) · (1 − share₂·min(flat))`, from
-  actuation until the first stand, at any height (sitting up counts).
-- **C, earlier improper-rise check:** base above 0.12 m (was 0.18) or torso more than 45° up
-  (`−g_z > 0.707`).
-- Prone and side resets cannot put the soles down while lying (no arms); they pay B while rolling or
-  kneeling the torso up, which pushes them to get the feet under the body first.
+`cov = mean over the 10 strip end points (toe and heel of each of the 5 capsules) of exp(−(relu(z)/0.003)²) · gate`
 
-## Revision 9: feet first only above sitting/kneeling height
+- `z` is the point's height above the ground.
+- `gate = 1 − exp(−relu(F − 0.01W)/0.05W)` is the foot-load gate.
 
-rev-8 `model_500` never stood unassisted (0/500); 45–70% of episodes ended kneeling upright (base
-0.10–0.13 m, knees loaded, no flat foot) with the hips pressed on their inner limits. Moving from sitting
-or kneeling onto two flat feet always lifts the hips while the feet are not yet flat, and prone/side
-resets must raise the torso before the feet can get under the body; A and B charged exactly those
-transitions, so kneeling (10% orientation credit, ~−0.9 knee cost) was the cheapest place to stay. C never
-switched on because the two-foot success EMA stayed 0.
+**Why not the force-strip version:** the rigid capsules sink less than 1 mm. A rev6 standing rollout
+(50k loaded-foot samples) gave:
 
-- A: the feet credit applies only above a base height of 0.16 m (σ width 0.02); sitting or kneeling upright
-  is paid in full.
-- B: only base-height increase (no uprightness rate), only above 0.14 m.
-- C: base above 0.18 m only (no torso-angle trigger).
-- Flat-feet definition, one-foot rise (−20), rise speed (−15) and the curriculum-scaled termination stay.
+| Measure | Value |
+|---|---|
+| Median sole roll | 1.04° |
+| Force coverage (mean) | 0.21: one strip carries everything in 60% of samples |
+| Force coverage ≥ 0.9 | 71% of samples below 0.1° roll, 0% above 0.25° |
 
-## Revision 10: feet-gated orientation (A) removed
+That would have demanded sub-0.1° ankle-roll precision. With a 3 mm tolerance, coverage ≥ 0.9
+corresponds to about ≤ 1.7° of roll or pitch. On the same rollout, standing coverage is 0.96.
 
-rev 9 never stood in 316 iterations, even with the pull force (rev 8: 0.84, rev 6: 0.98 at the same
-point). Sitting or kneeling upright below 0.16 m earned the full task orientation reward (~43 per
-episode, as much as standing in rev 6), and rising above 0.16 m without two flat feet cut it to 10%, so
-every way up lost reward. A is disabled (`orientation_feet_credit_floor = 1.0`); the orientation reward is
-as in rev 6. Feet first is enforced by B (base lift above 0.14 m without two flat feet) and C (improper-rise
-termination above 0.18 m with the curriculum), which charge *how* the robot rises without making rising
-itself unprofitable.
+- `coverage_pair = 0.3·mean(cov_L, cov_R) + 0.7·min(cov_L, cov_R)`.
+- `support_gate = smoothstep(share₂) · max(sup_L, sup_R)`: a smooth gate on both feet carrying load.
 
-## Revision 11: no dragging loaded feet; soles under the hips; short steps allowed
+| Term | Was | Now |
+|---|---|---|
+| `target_sole_contact_coverage` | +4, `0.5·mean + 0.5·cov_L·cov_R` | **+8**, `coverage_pair`. Contact-based, so it never restricts early recovery |
+| `style_loaded_sole_coverage_deficit` | −8 | **−10**, same formula (load-weighted). `loaded_sole_tilt` stays −8 |
+| `target_two_foot_flat_support` | +4 | **+6**, `share₂ · max(sup) · flat_L · flat_R · min(cov_L, cov_R)` |
+| `target_torso_center_over_feet` | — | **+4**, `support_gate · lift · exp(−(e_lat/0.08)²)`. `e_lat = |(p_torso,xy − p_mid,xy)·lateral|`, with `p_mid` the mean sole centre and `lateral` the robot lateral axis (`geo.lateral_axis`) |
+| `target_com_support` | +6 | +6, unchanged |
+| `target_com_support_margin` | — | **+2**, `support_gate · lift · smoothstep(margin/0.025)`. `margin` is the signed COM depth inside the support polygon, so the bonus is full at ≥ 2.5 cm and 0 on or outside the edge |
+| `target_stable_standing` | −0.05 | **−1.0**, same formula: standing gate · (mean q̇² + 0.25·|ω|²) · boost (≤ 2) |
 
-rev-10 `model_1000` rose on two flat feet (18–58% of rising steps, rev 6: 0%) but planted them wide and
-then slid them together under the COM while loaded: 17–24 cm of rising slip per episode (supine/side,
-70–78% of it sideways-inward, 100% toward the COM, mostly above 0.15 m). Prone slid only 6 cm because its
-feet were flat and loaded for 0.14 foot-s instead of 0.5–0.75. Closing the stance by lifting a foot was
-charged by the one-foot rise cost, the standing load imbalance and the improper-rise check, while the
-stance-width cost pulled the feet together during the rise.
+| `style_loaded_foot_translation` | — | **−4**, `mean_feet(hold · relu(v_xy − 0.03)/0.10)` (see below). `loaded_sole_slip` stays −6 |
 
-- `style_loaded_foot_drag` (−8): per foot `support · flat · min(2·(relu(|v_lat| − 0.02)/0.05)² +
-  (relu(|v_fwd| − 0.02)/0.05)², 9)`, sole-centre velocity, lateral = robot left; summed over feet,
-  after actuation (rising and standing).
-- Why the stance was wide: in every orientation one leg sat on its inner hip-roll stop (−7°) while the
-  other splayed out 29–36° with the ankle roll compensating, both knees ~+1.0. A joint stop is free
-  support under the relative action law, nothing charged a loaded foot placed far to the side of its hip
-  (`loaded_hip_roll_excess` is off in staged; `stance_width` only sees the distance between the feet), and
-  a narrow flat-footed squat is kinematically possible from a base height of ~0.19 m, where most rev-10
-  flat-footed rising happens.
-- `style_loaded_foot_splay` (−6): per foot `support · flat · min((relu(d_out − 0.10)/0.04)², 9)`, `d_out` =
-  sole centre outside its hip-pitch body along the lateral axis (default stance 0.057 m). Task space: it
-  charges the splayed sole, not a joint.
-- The stance-width cost stays as in rev 10 (also while rising).
-- Short steps: a foot below 5% of the weight for ≤ 0.2 s (fading to 0 at 0.4 s) while the other foot
-  stands is exempt from `style_one_foot_rise` and `style_standing_load_imbalance`, and counts as a proper
-  rise for the improper-rise check if the standing sole is flat and the COM is inside its support.
-  Anti-tapping: the swing timer restarts only after the foot has carried ≥ 15% of the weight for 0.25 s
-  (brief taps freeze it), and at most 1 s of exemption is granted per episode (`swing_exempt_time_s`).
+**`loaded_foot_translation`:**
+- `v_xy` is the horizontal speed of the sole centre, finite-differenced over the policy step. It is the
+  actual foot motion, not joint velocity.
+- `hold` follows `support_memory` up (load must be sustained). While the sole is within 5 mm of the
+  ground, it decays with τ = 0.25 s when the load drops. It resets to 0 once the sole is lifted.
+- So dragging a foot after briefly unloading it, while it still touches the ground, still pays.
+  Stepping and airborne repositioning are free.
 
-## Revision 12: show the policy the narrow flat-footed squat
+**Measured on rev6 model_1200** (rollout, not training):
 
-The narrow squat (both soles flat under the hips, COM between them) is kinematically possible from a base
-height of 0.206 m (hip pitch −1.25 and ankle pitch −0.5 at their limits; lower is impossible with the soles
-under the hips), but from a fallen start the policy never reached it: splaying one leg was easier to find.
+| Measure | Value |
+|---|---|
+| Gate on unloaded-but-touching moving steps | 0.31, vs 0.15 with `support_memory` alone |
+| Gate on airborne moving steps | 0 |
+| `loaded_foot_translation` cost | ≈ 0.09 per step |
+| `loaded_sole_slip` cost | ≈ 0.02 per step |
 
-- **Squat starts** (training only): 15% of resets start in a library pose (`squat_poses.py`, damped
-  Gauss-Newton IK: soles flat at the default standing positions, COM over the sole midpoint, no
-  self-collision; calf 0.9–1.6 → base 0.206–0.280 m, 14 poses), random yaw, ±0.03 rad joint noise,
-  actuated from the first step and without the pull force (the env's force is restored at its next
-  reset). Excluded from the penalty-curriculum EMA (`_penalty_ema_ids`) and from all stage/rise metrics;
-  logged as `squat_start_frac`, `squat_start_success`; fallen-start success as `fallen_success`.
-  Evaluation and playback use no squat starts.
-- **`target_narrow_squat_support` (+6):** `share₂·min(flat) · mean_feet exp(−((d_out − 0.057)/0.03)²) ·
-  com_score · rise_gate`, a positive guide toward the same posture while rising.
-- Together with rev 11b's foot-splay and foot-drag costs.
+The two terms overlap: both see a loaded sole that slides. They differ in two ways:
+- **Velocity:** slip uses per-contact tangential velocity, weighted by each capsule's own load.
+  Translation uses the foot as a whole, weighted by the held load.
+- **What each catches:** translation also catches light-load shuffling.
 
+Both are logged separately.
+
+**Readiness:**
+- Was: `feet_under_com · share₂ · min(flat) · com_score · exp(−(d_centre/0.03)²)`.
+- Now: `ready = sqrt(coverage_pair · com_score) · support_gate`. The COM-centring factor is dropped;
+  `ready_com_centre_sigma_m` is removed.
+- Height credit (head height, target base height, foot-supported height): `0.05 + 0.95·ready` →
+  **`0.2 + 0.3·support_gate + 0.5·ready`**.
+
+**Intermediate steps from one foot to two.** The first 13 run, at `model_200`, rose on one foot in 48%
+of rising steps and on two in 8%. Per rising step, style + target favoured two feet by only +0.14:
+
+- The one-foot penalty was worth +0.195.
+- A freshly loaded, tilted, close-placed second foot immediately paid stance width, coverage
+  deficit, tilt, posture and translation, about −0.25 in total.
+- The ready-based rewards paid almost nothing until both soles were planted exactly (ready 0.015).
+- The height credit was 0.200 on one foot vs 0.212 on two.
+
+Changes:
+
+- **Height credit:** both feet carrying load already earns +0.3 (`support_gate`, smooth). Full
+  readiness adds the remaining 0.5. Since `ready ≤ support_gate`, the steps are 0.2 (one foot) → 0.5
+  (both loaded) → 1.0 (ready).
+- **Settled load:** `loaded_sole_coverage_deficit` and `loaded_sole_tilt` are weighted by
+  `sup · support_memory` instead of `sup`. A foot that has just touched down is not charged in full
+  before it settles: `support_memory` rises with τ = 0.1 s.
+- **Rising stance:** `stance_width` is ×0.25 while rising, ramping to ×1 with the standing gate. A
+  second foot may land close to the first and be adjusted. `leg_contact` (−6) still charges legs
+  that press on each other.
+
+**Monitors** (`Episode_end/`, over standing steps):
+- `standing_min_sole_coverage`;
+- `standing_both_soles_cov90_frac` (both soles ≥ 0.9 coverage);
+- `standing_torso_lateral_err_m`;
+- `standing_com_margin_m` (signed, finite steps only).
+- Over actuated steps:
+  - `peak_hip_roll_rad` (max outward hip roll);
+  - `loaded_foot_translation` (mean cost);
+  - `loaded_drag_dist_left_m` / `_right_m` (horizontal sole travel while `hold > 0.5`);
+  - `moving_contact_foot_load_w` (foot load / W while the foot moves in contact).
+
+`config.json` records `staged.revision = "13"`.
+
+### Revision 13, after standing: adjust the stance by stepping, return to the default place
+
+`model_600` stood with its feet 9.8 cm outside the hips (default 5.7 cm) and slid them inward by about
+4 cm per foot within the first second, mostly faster than 10 cm/s. It lifted a foot 0–0.15 times per
+episode, and the feet ended staggered by about ±7.5 cm fore-aft.
+
+Sliding paid off: the joint-space `default_posture` dropped by ~0.5, worth about +30 to +60 per
+episode, against about −0.7 of slip and translation cost. Stepping cost `standing_load_imbalance`. At
+the final action scale of 0.25, the same policy neither slid nor stepped: it stayed 13 cm wide.
+
+**"Lifted" and "standing":**
+- A foot is *lifted* when its sole clearance is ≥ 1 cm and its load is < 5% W.
+- The robot is *standing* when base h > 0.30 m and upright > 0.8.
+
+| Term | Scale | Value |
+|---|---:|---|
+| `style_standing_foot_anchor` | −4 | `standing_gate · mean_feet(hold · min(3, relu(|xy − anchor| − 1 cm)/2 cm))`. The anchor follows the foot while it is lifted or the robot is not yet standing, and freezes where the foot was set down. A planted foot that slides pays for as long as it stays displaced; lifting it re-anchors it for free |
+| `target_stance_return` | +4 | `standing_gate · mean_feet(planted · ½[exp(−(e/2 cm)²) + exp(−(e/8 cm)²)])`, with `e` the horizontal distance of the sole centre from its default place relative to its own hip: 5.68 cm outward, 0.37 cm forward, measured at zero joints. Task space, so moving the joints without moving the foot does not earn it |
+
+**Short steps while standing are exempt:**
+- **Exempt terms:** `standing_load_imbalance`, and the swing leg's joints in `stable_standing`
+  (base angular velocity still counts).
+- **Who qualifies:** a lifted foot while the other is down, with `swing_credit(air, 0.3 s, 0.5 s)`.
+- **Timer reset:** the air timer restarts only after the foot has been planted (≥ 15% W) for 0.25 s.
+  Rapid taps do not reset it.
+- **Budget:** 1.5 s of exemption per episode.
+
+Both feet may step, one after the other.
+
+**Measured on `model_700` (current behaviour, not trained with these terms):**
+
+| Measure | Value |
+|---|---|
+| Anchor drift while standing | 3.6 cm (anchor −29 per episode) |
+| Stance error | 8.8 cm (stance return +4.5 per episode) |
+| Upper bound for stepping into place | about +30 return, no anchor cost |
+
+**Monitors:**
+- `standing_lifts_per_ep`, `standing_swing_exempt_s`;
+- `standing_anchor_drift_m`;
+- `standing_stance_offset_err_m`, `final_stance_offset_err_m`.
+
+Trained from scratch: at iteration 700 the policy noise std had fallen from 0.8 to 0.15, too little
+exploration to discover stepping.
+
+### Revision 13, after standing (2): make stepping discoverable, make sliding escalate
+
+**What happened at `model_800`** (first run with the anchor):
+- After standing, the policy slid each loaded foot 8–12 cm in the first 3 s.
+- It lifted a foot 0–0.27 times per episode, and reached a stance error of 3.7 cm.
+- It accepted about −57 of anchor cost per episode. A single lift would have re-anchored the foot,
+  but the policy had almost never lifted a foot while standing, so it never saw that.
+
+The changes:
+
+- **Stance starts.** 15% of training resets begin standing in a displaced stance, from an IK library
+  of 64 poses (`stance_poses.py`):
+  - Each foot is 2–8 cm wider than default; feet are mostly staggered up to ±8 cm fore-aft.
+  - Soles flat, COM between the feet, torso upright, base 0.33–0.35 m, random yaw.
+  - Episodes are actuated at once with no pull force. They are excluded from the curriculum EMA and
+    from the fallen-start stage, rise and standing metrics.
+  - Logged: `stance_start_success`, `stance_start_lifts_per_ep`, `stance_start_final_err_m`,
+    `fallen_success`.
+- **`target_step_placement` (+100, an impulse).** At each touchdown while standing:
+  `clip((e_at_lift − e_at_touchdown)/2 cm, ±3)`. It is signed, so stepping out and back in nets zero.
+  A step that removes 5 cm of stance error earns about +5.
+- **Escalating anchor cost.**
+  - The cap goes from 3 to 10 per foot.
+  - The cost is multiplied by `1 + post_stand_drag/5 cm`. `post_stand_drag` is the episode's loaded
+    sliding while fully standing, per foot max: travel of a foot within 5 mm of the ground carrying
+    ≥ 5% W, counted from the first contact with no settling delay.
+- **Drag termination (training only).** An episode ends when `post_stand_drag` exceeds a limit. The
+  limit is off until the success curriculum starts, then goes from 20 cm to 6 cm as it completes.
+  Logged: `term_drag`, `drag_termination_limit`, `post_stand_drag_m`.
+- **Anchors** are initialised at the feet on the first step of every episode, so stance starts do not
+  inherit a stale anchor.
+
+Evaluation and playback disable the drag termination and the stance starts.
+
+**Checked on `model_800`, all resets forced to stance starts:**
+
+| Measure | Value |
+|---|---|
+| Standing at step 0 | yes, h 0.341, both feet loaded after one step |
+| Stance error at reset | 5.8 cm |
+| Feet slide (old policy) | 6.6 cm, `post_stand_drag` 7.4 cm |
+| Anchor cost | about ×2.5 |
+| Lifts | 0 |
+
+### Revision 13, after standing (3): no drag termination, action-scale floor 0.30
+
+Run `20261013_123752_rev6a` collapsed after iteration ~1200:
+
+| Iteration | 1100 | 1600 | ~1635 |
+|---|---:|---:|---:|
+| Fallen-start success | 0.95 | 0.51 | 0.06 |
+| Action scale | 0.47 | 0.26 | 0.24 |
+
+- Once the success curriculum started, the drag termination (limit about 16–20 cm) ended 40–70% of
+  episodes, together with the tightening velocity termination (up to 37%). The policy had not yet
+  learned to step, so standing up became the risky action.
+- Meanwhile the inherited action-scale schedule kept lowering the scale on head height alone.
+
+Changes:
+- `drag_termination = False`.
+- `action_scale_floor = 0.30`: `update_force_curriculum` clamps `action_rescale` from below.
+
+Training resumes from `model_1100` of that run (fallen success 0.95, stance error ~2 cm, no jitter).
+The anchor escalation, step placement reward and 15% stance starts stay.
