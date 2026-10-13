@@ -53,14 +53,32 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # Leg-on-leg contact: 0.5% W deadband, saturating with a 5% W scale (~3.4 N).
     leg_contact_deadband_weight_fraction = 0.005
     leg_contact_scale_weight_fraction = 0.05
-    # Rising credit keeps this fraction until the robot is "ready": feet under
-    # the COM, both feet flat on the ground (weaker foot >= two_foot_full_share
-    # of the load) and the COM over the support polygon.
-    height_credit_com_floor = 0.05
+    # Revision tag, recorded in the run metadata (config.json).
+    revision = "6a"
+    # Rising credit = floor + (1 - floor) * ready, with
+    # ready = sqrt(coverage_pair * com_score) * support_gate (revision 6a):
+    # both soles planted, COM over their support polygon, both feet loaded
+    # (weaker foot >= two_foot_full_share of the load).
+    height_credit_com_floor = 0.2
     two_foot_full_share = 0.3
-    # Ready also needs the COM centred between the feet (distance to the centroid
-    # of the loaded sole corners).
-    ready_com_centre_sigma_m = 0.03
+    # Sole coverage is geometric (revision 6a): strip end points within this
+    # clearance of the ground, times a foot-load gate 1 - exp(-relu(F - d W) / (s W)).
+    sole_coverage_tolerance_m = 0.003
+    sole_coverage_load_deadband_weight_fraction = 0.01
+    sole_coverage_load_scale_weight_fraction = 0.05
+    # Loaded foot translation (revision 6a): horizontal sole-centre speed above the
+    # threshold, gated by a load hold that decays with this time constant while
+    # the sole stays within the contact clearance, and resets once it is lifted.
+    foot_translation_threshold_m_s = 0.03
+    foot_translation_scale_m_s = 0.10
+    foot_translation_contact_clearance_m = 0.005
+    foot_translation_hold_decay_s = 0.25
+    # coverage_pair = w * mean(cov_L, cov_R) + (1 - w) * min(cov_L, cov_R).
+    coverage_pair_mean_weight = 0.3
+    # Torso over the midpoint of the feet, along the robot lateral axis.
+    torso_center_sigma_m = 0.08
+    # COM inside the two-foot support polygon: full bonus at this margin.
+    com_margin_full_m = 0.025
     # Slow rise: upward COM speed above this costs (a 1.5 s rise is ~0.17 m/s).
     rise_speed_threshold_m_s = 0.20
     rise_speed_scale_m_s = 0.10
@@ -108,8 +126,17 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       style_hip_roll_deviation = 0.0
       # Pipeline terms (raw scales, multiplied by dt = 0.02 in HoST).
       target_feet_under_com = 3.0
-      target_two_foot_flat_support = 4.0
+      # Revision 6a: planted soles (coverage) and a centred, stable stance.
+      target_sole_contact_coverage = 8.0
+      style_loaded_sole_coverage_deficit = -10.0
+      target_two_foot_flat_support = 6.0
+      target_torso_center_over_feet = 4.0
       target_com_support = 6.0
+      target_com_support_margin = 2.0
+      target_stable_standing = -1.0
+      # Do not slide a loaded foot (e.g. dragging it inward after opening the hip
+      # roll): reposition by lifting it. Separate from loaded_sole_slip (-6, kept).
+      style_loaded_foot_translation = -4.0
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
       # Getting up must use both feet: any rising step with the load on one foot pays.

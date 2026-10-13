@@ -122,19 +122,78 @@ class GeometryTests(unittest.TestCase):
     self.assertAlmostEqual(share[1].item(), (4 / 68) / 0.3, places=4)  # one-foot standing ~0.2
     self.assertEqual(share[2].item(), 0.0)
     self.assertAlmostEqual(share[3].item(), (20 / 68) / 0.3, places=4)
-    ones = torch.ones(4)
-    ready = geo.rise_ready_score(ones, share, ones, torch.tensor([1.0, 1.0, 1.0, 0.0]), ones)
+    gate = geo.two_foot_support_gate(share, torch.ones(4))
+    self.assertEqual(gate[0].item(), 1.0)
+    self.assertLess(gate[1].item(), 0.11)  # one-foot standing: smoothstep(0.196) = 0.100
+    self.assertEqual(gate[2].item(), 0.0)
+    cov = torch.ones(4)
+    ready = geo.rise_ready_score(cov, torch.tensor([1.0, 1.0, 1.0, 0.0]), gate)
     self.assertEqual(ready[0].item(), 1.0)
-    self.assertLess(ready[1].item(), 0.25)
+    self.assertLess(ready[1].item(), 0.11)
     self.assertEqual(ready[2].item(), 0.0)
     self.assertEqual(ready[3].item(), 0.0)  # COM outside the support
+    half = geo.rise_ready_score(torch.tensor([0.25]), torch.tensor([1.0]), torch.tensor([1.0]))
+    self.assertAlmostEqual(half.item(), 0.5, places=6)  # geometric mean of coverage and COM support
 
-  def test_com_centred_and_rise_speed(self):
-    centre = torch.tensor([0.0, 0.03, math.inf])
-    score = geo.com_centred_score(centre, 0.03)
-    self.assertEqual(score[0].item(), 1.0)
-    self.assertAlmostEqual(score[1].item(), math.exp(-1.0), places=5)
-    self.assertEqual(score[2].item(), 0.0)  # no support at all
+  def test_coverage_pair_weights_the_worse_sole(self):
+    pair = geo.coverage_pair_score(torch.tensor([1.0, 1.0, 0.5]), torch.tensor([1.0, 0.0, 0.5]), 0.3)
+    self.assertTrue(torch.allclose(pair, torch.tensor([1.0, 0.15, 0.5])))
+
+  def test_polygon_margin_is_signed(self):
+    corners, _ = two_feet(0.08, -0.08)
+    verts = corners[..., :2].reshape(1, 8, 2).expand(3, 8, 2)
+    valid = torch.ones(3, 8, dtype=torch.bool)
+    valid[2] = False
+    point = torch.tensor([[-0.05, 0.0], [-0.05, 0.30], [0.0, 0.0]])
+    out, _, _, margin = geo.support_polygon_distance(point, verts, valid, with_margin=True)
+    # Between the feet, 5 cm behind the toe line (x = 0.026): nearest edge is the toe edge.
+    self.assertAlmostEqual(margin[0].item(), 0.076, places=3)
+    self.assertAlmostEqual(margin[1].item(), -out[1].item(), places=6)
+    self.assertTrue(math.isinf(margin[2].item()) and margin[2].item() < 0)
+    score = geo.com_margin_score(torch.tensor([0.05, 0.0125, -0.02, -math.inf, math.nan]), 0.025)
+    self.assertTrue(torch.allclose(score, torch.tensor([1.0, 0.5, 0.0, 0.0, 0.0])))
+
+  def test_torso_lateral_error_uses_the_lateral_axis_only(self):
+    feet = torch.tensor([[[0.0, 0.08], [0.0, -0.08]], [[0.0, 0.08], [0.0, -0.08]]])
+    torso = torch.tensor([[0.10, 0.0], [0.0, -0.05]])
+    lateral = torch.tensor([[0.0, 1.0], [0.0, 1.0]])
+    err = geo.torso_lateral_error(torso, feet, lateral)
+    self.assertTrue(torch.allclose(err, torch.tensor([0.0, 0.05])))  # fore-aft offset is free
+
+  def test_geometric_sole_coverage_tolerates_small_tilt_only(self):
+    pos = torch.tensor([[[0.0, 0.08, 0.048], [0.0, -0.08, 0.048]]])
+    flat = torch.stack([IDENTITY, IDENTITY])[None]
+    z = geo.sole_strip_points_world(pos, flat)[..., 2]
+    self.assertEqual(tuple(z.shape), (1, 2, 10))
+    self.assertTrue(torch.allclose(z, torch.zeros_like(z), atol=1e-6))
+    cov = geo.geometric_sole_coverage(z, torch.ones(1, 2), 0.003)
+    self.assertTrue(torch.allclose(cov, torch.ones(1, 2)))
+    def rolled(deg):  # roll about the foot x axis, lowest edge on the ground
+      a = math.radians(deg)
+      q = torch.tensor([math.cos(a / 2), math.sin(a / 2), 0.0, 0.0])
+      pts = geo.sole_strip_points_world(torch.zeros(1, 1, 3), q[None, None])[..., 2]
+      return geo.geometric_sole_coverage(pts - pts.amin(-1, keepdim=True), torch.ones(1, 1), 0.003).item()
+    self.assertGreater(rolled(1.0), 0.9)
+    self.assertLess(rolled(3.0), 0.8)
+    self.assertLess(rolled(10.0), 0.4)
+    half = geo.geometric_sole_coverage(torch.zeros(1, 2, 10), torch.tensor([[1.0, 0.5]]), 0.003)
+    self.assertTrue(torch.allclose(half, torch.tensor([[1.0, 0.5]])))  # load gate
+
+  def test_foot_translation_hold_survives_brief_unloading_in_contact_only(self):
+    decay = math.exp(-0.02 / 0.25)
+    hold = torch.tensor([[1.0, 1.0]])
+    memory = torch.zeros(1, 2)  # load dropped to zero on both feet
+    contact = torch.tensor([[True, False]])  # left still on the ground, right lifted
+    for _ in range(5):  # 0.1 s
+      hold = geo.contact_load_hold(hold, memory, contact, decay)
+    self.assertAlmostEqual(hold[0, 0].item(), decay ** 5, places=5)  # ~0.67: dragging still pays
+    self.assertEqual(hold[0, 1].item(), 0.0)  # stepping is free
+    loaded = geo.contact_load_hold(torch.zeros(1, 2), torch.tensor([[0.8, 0.8]]), torch.tensor([[True, True]]), decay)
+    self.assertTrue(torch.allclose(loaded, torch.tensor([[0.8, 0.8]])))
+    cost = geo.foot_translation_cost(torch.tensor([[0.13, 0.5], [0.02, 0.02]]), torch.tensor([[1.0, 0.0], [1.0, 1.0]]), 0.03, 0.10)
+    self.assertTrue(torch.allclose(cost, torch.tensor([0.5, 0.0])))
+
+  def test_rise_speed(self):
     cost = geo.rise_speed_cost(torch.tensor([0.1, 0.3, 2.0, -1.0]), 0.2, 0.1, 9.0)
     self.assertTrue(torch.allclose(cost, torch.tensor([0.0, 1.0, 9.0, 0.0])))
 
@@ -187,7 +246,8 @@ class ConfigTests(unittest.TestCase):
     for name in ("target_feet_under_com", "target_two_foot_flat_support", "target_com_support",
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
-                 "style_one_foot_rise", "style_rise_speed"):
+                 "style_one_foot_rise", "style_rise_speed", "target_torso_center_over_feet",
+                 "target_com_support_margin", "target_sole_contact_coverage", "style_loaded_foot_translation"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
@@ -195,6 +255,24 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(StagedRecoveryCfg.staged.motor_max_speed_rad_s, 4.0)
     self.assertEqual(StagedRecoveryCfg.curriculum.force, 40)
     self.assertFalse(hasattr(StagedRecoveryCfg.staged, "force_requires_com"))
+
+  def test_revision_6a_scales_and_unique_reward_functions(self):
+    s = StagedRecoveryCfg.constraints.scales
+    expected = {
+      "target_sole_contact_coverage": 8.0, "style_loaded_sole_coverage_deficit": -10.0,
+      "style_loaded_sole_tilt": -8.0, "target_two_foot_flat_support": 6.0,
+      "target_torso_center_over_feet": 4.0, "target_com_support": 6.0,
+      "target_com_support_margin": 2.0, "target_stable_standing": -1.0,
+      "style_loaded_foot_translation": -4.0, "style_loaded_sole_slip": -6.0,
+    }
+    for name, value in expected.items():
+      self.assertEqual(getattr(s, name), value, name)
+    self.assertEqual(StagedRecoveryCfg.staged.height_credit_com_floor, 0.2)
+    self.assertEqual(StagedRecoveryCfg.staged.revision, "6a")
+    self.assertFalse(hasattr(StagedRecoveryCfg.staged, "ready_com_centre_sigma_m"))
+    active = [n for n in dir(s) if not n.startswith("_") and getattr(s, n) != 0]
+    functions = [n.split("_", 1)[1] for n in active]
+    self.assertEqual(len(functions), len(set(functions)), "a reward function is registered twice")
 
 
 if __name__ == "__main__":

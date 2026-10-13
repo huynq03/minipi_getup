@@ -220,3 +220,92 @@ and the unsupported-ascent cost were cheaper than a slower two-foot rise.
   - `style_rise_speed` (−4): upward COM speed above 0.2 m/s, so a ~1.5 s rise is free and a ballistic
     0.5 s rise is not.
 
+
+## Revision 6a: planted soles, a centred torso and still standing (from scratch)
+
+Rev 6 got up well, but rose on tilted feet (0% of rising steps on two flat soles) and, after resuming
+past ~2000 iterations, oscillated at ~8.5 Hz while standing: joint-speed RMS 0.29 → 2.0 rad/s by
+iteration 6300, as the action scale fell to 0.25. The only standing-motion cost was
+`stable_standing` at −0.05, about −0.1 per episode against a return of ~350. Revision 6a starts
+again from scratch with the changes below. HoST multi-critic PPO, the force and action-scale
+curricula, and every other term are unchanged.
+
+`cov_L`, `cov_R` are per-foot sole coverages. They are computed once per step in
+`_update_stage_state`, and the override replaces host_safe_recovery's coverage everywhere, including
+`loaded_sole_coverage_deficit`. Revision 6a defines them **geometrically**:
+
+`cov = mean over the 10 strip end points (toe and heel of each of the 5 capsules) of exp(−(relu(z)/0.003)²) · gate`
+
+- `z` is the point's height above the ground.
+- `gate = 1 − exp(−relu(F − 0.01W)/0.05W)` is the foot-load gate.
+
+**Why not the force-strip version:** the rigid capsules sink less than 1 mm. A rev6 standing rollout
+(50k loaded-foot samples) gave:
+
+| Measure | Value |
+|---|---|
+| Median sole roll | 1.04° |
+| Force coverage (mean) | 0.21: one strip carries everything in 60% of samples |
+| Force coverage ≥ 0.9 | 71% of samples below 0.1° roll, 0% above 0.25° |
+
+That would have demanded sub-0.1° ankle-roll precision. With a 3 mm tolerance, coverage ≥ 0.9
+corresponds to about ≤ 1.7° of roll or pitch. On the same rollout, standing coverage is 0.96.
+
+- `coverage_pair = 0.3·mean(cov_L, cov_R) + 0.7·min(cov_L, cov_R)`.
+- `support_gate = smoothstep(share₂) · max(sup_L, sup_R)`: a smooth gate on both feet carrying load.
+
+| Term | Was | Now |
+|---|---|---|
+| `target_sole_contact_coverage` | +4, `0.5·mean + 0.5·cov_L·cov_R` | **+8**, `coverage_pair`. Contact-based, so it never restricts early recovery |
+| `style_loaded_sole_coverage_deficit` | −8 | **−10**, same formula (load-weighted). `loaded_sole_tilt` stays −8 |
+| `target_two_foot_flat_support` | +4 | **+6**, `share₂ · max(sup) · flat_L · flat_R · min(cov_L, cov_R)` |
+| `target_torso_center_over_feet` | — | **+4**, `support_gate · lift · exp(−(e_lat/0.08)²)`. `e_lat = |(p_torso,xy − p_mid,xy)·lateral|`, with `p_mid` the mean sole centre and `lateral` the robot lateral axis (`geo.lateral_axis`) |
+| `target_com_support` | +6 | +6, unchanged |
+| `target_com_support_margin` | — | **+2**, `support_gate · lift · smoothstep(margin/0.025)`. `margin` is the signed COM depth inside the support polygon, so the bonus is full at ≥ 2.5 cm and 0 on or outside the edge |
+| `target_stable_standing` | −0.05 | **−1.0**, same formula: standing gate · (mean q̇² + 0.25·|ω|²) · boost (≤ 2) |
+
+| `style_loaded_foot_translation` | — | **−4**, `mean_feet(hold · relu(v_xy − 0.03)/0.10)` (see below). `loaded_sole_slip` stays −6 |
+
+**`loaded_foot_translation`:**
+- `v_xy` is the horizontal speed of the sole centre, finite-differenced over the policy step. It is the
+  actual foot motion, not joint velocity.
+- `hold` follows `support_memory` up (load must be sustained). While the sole is within 5 mm of the
+  ground, it decays with τ = 0.25 s when the load drops. It resets to 0 once the sole is lifted.
+- So dragging a foot after briefly unloading it, while it still touches the ground, still pays.
+  Stepping and airborne repositioning are free.
+
+**Measured on rev6 model_1200** (rollout, not training):
+
+| Measure | Value |
+|---|---|
+| Gate on unloaded-but-touching moving steps | 0.31, vs 0.15 with `support_memory` alone |
+| Gate on airborne moving steps | 0 |
+| `loaded_foot_translation` cost | ≈ 0.09 per step |
+| `loaded_sole_slip` cost | ≈ 0.02 per step |
+
+The two terms overlap: both see a loaded sole that slides. They differ in two ways:
+- **Velocity:** slip uses per-contact tangential velocity, weighted by each capsule's own load.
+  Translation uses the foot as a whole, weighted by the held load.
+- **What each catches:** translation also catches light-load shuffling.
+
+Both are logged separately.
+
+**Readiness:**
+- Was: `feet_under_com · share₂ · min(flat) · com_score · exp(−(d_centre/0.03)²)`.
+- Now: `ready = sqrt(coverage_pair · com_score) · support_gate`. The COM-centring factor is dropped;
+  `ready_com_centre_sigma_m` is removed.
+- Height credit (head height, target base height, foot-supported height): `0.05 + 0.95·ready` →
+  **`0.2 + 0.8·ready`**.
+
+**Monitors** (`Episode_end/`, over standing steps):
+- `standing_min_sole_coverage`;
+- `standing_both_soles_cov90_frac` (both soles ≥ 0.9 coverage);
+- `standing_torso_lateral_err_m`;
+- `standing_com_margin_m` (signed, finite steps only).
+- Over actuated steps:
+  - `peak_hip_roll_rad` (max outward hip roll);
+  - `loaded_foot_translation` (mean cost);
+  - `loaded_drag_dist_left_m` / `_right_m` (horizontal sole travel while `hold > 0.5`);
+  - `moving_contact_foot_load_w` (foot load / W while the foot moves in contact).
+
+`config.json` records `staged.revision = "6a"`.
