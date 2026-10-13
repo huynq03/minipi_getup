@@ -9,9 +9,10 @@ from mjlab.actuator import BuiltinMotorActuatorCfg
 
 import minipi_getup.host.env as host_env
 
-ASSET_XML = Path(
-  "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
-  "hightorque_minipi/xmls/cl_pai_host_torso_host_legs_wide_hip.xml"
+# Package-relative, so a fresh clone of this branch finds it.
+ASSET_XML = (
+  Path(__file__).resolve().parents[1]
+  / "asset_zoo/robots/hightorque_minipi/xmls/cl_pai_host_torso_host_legs_wide_hip.xml"
 )
 EXPECTED_ASSET_SHA256 = "a0a961cbd522d7836b48b4e77160128df0c3f640f01de19617b43657800eb533"
 

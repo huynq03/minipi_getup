@@ -24,9 +24,10 @@ from pathlib import Path
 
 from minipi_getup.host_safe_recovery import asset as safe_asset
 
-ASSET_XML = Path(
-  "/home/huy/minipi_getup/src/minipi_getup/asset_zoo/robots/"
-  "hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_legcoll.xml"
+# Package-relative, so a fresh clone of this branch finds it.
+ASSET_XML = (
+  Path(__file__).resolve().parents[1]
+  / "asset_zoo/robots/hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_legcoll.xml"
 )
 EXPECTED_ASSET_SHA256 = "ea7d909d9a0516d18f84d43a9bbbc5a1d03b109e11e15e1793dd527fe439ebb0"
 
