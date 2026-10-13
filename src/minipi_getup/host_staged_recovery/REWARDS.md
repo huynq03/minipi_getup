@@ -330,3 +330,48 @@ Changes:
   - `moving_contact_foot_load_w` (foot load / W while the foot moves in contact).
 
 `config.json` records `staged.revision = "6a"`.
+
+### 6a, after standing: adjust the stance by stepping, return to the default place
+
+`model_600` stood with its feet 9.8 cm outside the hips (default 5.7 cm) and slid them inward by about
+4 cm per foot within the first second, mostly faster than 10 cm/s. It lifted a foot 0–0.15 times per
+episode, and the feet ended staggered by about ±7.5 cm fore-aft.
+
+Sliding paid off: the joint-space `default_posture` dropped by ~0.5, worth about +30 to +60 per
+episode, against about −0.7 of slip and translation cost. Stepping cost `standing_load_imbalance`. At
+the final action scale of 0.25, the same policy neither slid nor stepped: it stayed 13 cm wide.
+
+**"Lifted" and "standing":**
+- A foot is *lifted* when its sole clearance is ≥ 1 cm and its load is < 5% W.
+- The robot is *standing* when base h > 0.30 m and upright > 0.8.
+
+| Term | Scale | Value |
+|---|---:|---|
+| `style_standing_foot_anchor` | −4 | `standing_gate · mean_feet(hold · min(3, relu(|xy − anchor| − 1 cm)/2 cm))`. The anchor follows the foot while it is lifted or the robot is not yet standing, and freezes where the foot was set down. A planted foot that slides pays for as long as it stays displaced; lifting it re-anchors it for free |
+| `target_stance_return` | +4 | `standing_gate · mean_feet(planted · ½[exp(−(e/2 cm)²) + exp(−(e/8 cm)²)])`, with `e` the horizontal distance of the sole centre from its default place relative to its own hip: 5.68 cm outward, 0.37 cm forward, measured at zero joints. Task space, so moving the joints without moving the foot does not earn it |
+
+**Short steps while standing are exempt:**
+- **Exempt terms:** `standing_load_imbalance`, and the swing leg's joints in `stable_standing`
+  (base angular velocity still counts).
+- **Who qualifies:** a lifted foot while the other is down, with `swing_credit(air, 0.3 s, 0.5 s)`.
+- **Timer reset:** the air timer restarts only after the foot has been planted (≥ 15% W) for 0.25 s.
+  Rapid taps do not reset it.
+- **Budget:** 1.5 s of exemption per episode.
+
+Both feet may step, one after the other.
+
+**Measured on `model_700` (current behaviour, not trained with these terms):**
+
+| Measure | Value |
+|---|---|
+| Anchor drift while standing | 3.6 cm (anchor −29 per episode) |
+| Stance error | 8.8 cm (stance return +4.5 per episode) |
+| Upper bound for stepping into place | about +30 return, no anchor cost |
+
+**Monitors:**
+- `standing_lifts_per_ep`, `standing_swing_exempt_s`;
+- `standing_anchor_drift_m`;
+- `standing_stance_offset_err_m`, `final_stance_offset_err_m`.
+
+Trained from scratch: at iteration 700 the policy noise std had fallen from 0.8 to 0.15, too little
+exploration to discover stepping.

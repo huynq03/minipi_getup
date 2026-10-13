@@ -245,6 +245,42 @@ def foot_translation_cost(foot_speed_xy, gate, threshold, scale):
   return (gate * torch.relu(foot_speed_xy - threshold) / scale).mean(-1)
 
 
+def foot_anchor_update(anchor, foot_xy, follow):
+  """Anchor = where the foot last settled. It follows the foot while `follow`
+  (lifted, or not yet standing) and freezes once the foot is down."""
+  return torch.where(follow[..., None], foot_xy, anchor)
+
+
+def foot_anchor_cost(foot_xy, anchor, hold, deadband, scale, cap):
+  """mean over feet of hold * min(cap, relu(drift - deadband) / scale): a planted
+  foot that slides away from where it was set down pays for as long as it stays
+  there; lifting it re-anchors it for free."""
+  drift = torch.linalg.vector_norm(foot_xy - anchor, dim=-1)
+  return (hold * (torch.relu(drift - deadband) / scale).clamp(max=cap)).mean(-1)
+
+
+def stance_offset_error(sole_xy, hip_xy, forward, lateral, default_out, default_fwd):
+  """Per-foot horizontal distance (m) of the sole centre from its default place
+  relative to its own hip: default_out outward along the lateral axis (left foot
+  +lateral, right foot -lateral) and default_fwd along the heading.
+  sole_xy, hip_xy (N, 2, 2); forward, lateral (N, 2)."""
+  rel = sole_xy - hip_xy
+  out = (rel * lateral[:, None]).sum(-1) * torch.tensor([1.0, -1.0], device=rel.device, dtype=rel.dtype)
+  fwd = (rel * forward[:, None]).sum(-1)
+  return torch.sqrt((out - default_out).square() + (fwd - default_fwd).square())
+
+
+def stance_return_score(err, sigmas):
+  """Mean of exp(-(err/sigma)^2) over the given sigmas (fine + coarse)."""
+  return torch.stack([torch.exp(-(err / s).square()) for s in sigmas]).mean(0)
+
+
+def swing_credit(air_time, free_s, max_s):
+  """1 for a foot that has been off the ground at most `free_s`, falling to 0
+  at `max_s`: a short lift to re-place a foot is exempt, standing on one foot is not."""
+  return (1.0 - (air_time - free_s) / (max_s - free_s)).clamp(0.0, 1.0)
+
+
 def rise_speed_cost(com_vz, threshold, scale, cap):
   """Squared upward COM speed above `threshold`: getting up slowly is free."""
   return (torch.relu(com_vz - threshold) / scale).square().clamp(max=cap)

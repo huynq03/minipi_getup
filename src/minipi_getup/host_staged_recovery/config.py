@@ -77,6 +77,32 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     foot_translation_scale_m_s = 0.10
     foot_translation_contact_clearance_m = 0.005
     foot_translation_hold_decay_s = 0.25
+    # After standing (revision 6a, step 2): adjust the stance by lifting feet, not
+    # by sliding them. A foot is "lifted" when its sole clears the ground by this
+    # height while carrying less than this share of the weight.
+    lift_clearance_m = 0.01
+    lift_unloaded_weight_fraction = 0.05
+    # Anchor: drift of a planted foot from where it was set down.
+    anchor_deadband_m = 0.01
+    anchor_scale_m = 0.02
+    anchor_cost_cap = 3.0
+    # Default foot place relative to its hip (zero joints): 5.68 cm outward, 0.37 cm forward.
+    stance_default_out_m = 0.0568
+    stance_default_fwd_m = 0.0037
+    # Two kernels: a coarse one (gradient from a wide/staggered stance) and a fine one.
+    stance_return_sigma_m = (0.02, 0.08)
+    # The anchor freezes once the robot is fully up (rising may still slide feet).
+    anchor_stand_height_m = 0.30
+    anchor_stand_upright = 0.8
+    # Swing exemption while standing: a lifted foot exempts the load-imbalance and
+    # its own leg's joint motion (stable_standing) for swing_free_s, fading out by
+    # swing_max_s. The timer restarts only after the foot is planted (>= touchdown
+    # share of the weight) for swing_touchdown_hold_s; swing_budget_s per episode.
+    swing_free_s = 0.3
+    swing_max_s = 0.5
+    swing_touchdown_weight_fraction = 0.15
+    swing_touchdown_hold_s = 0.25
+    swing_budget_s = 1.5
     # coverage_pair = w * mean(cov_L, cov_R) + (1 - w) * min(cov_L, cov_R).
     coverage_pair_mean_weight = 0.3
     # Torso over the midpoint of the feet, along the robot lateral axis.
@@ -141,6 +167,10 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       # Do not slide a loaded foot (e.g. dragging it inward after opening the hip
       # roll): reposition by lifting it. Separate from loaded_sole_slip (-6, kept).
       style_loaded_foot_translation = -4.0
+      # After standing: a planted foot must not drift from where it was set down;
+      # feet return to their default place (task space), by stepping.
+      style_standing_foot_anchor = -4.0
+      target_stance_return = 4.0
       style_stance_width = -4.0
       style_unsupported_ascent = -6.0
       # Getting up must use both feet: any rising step with the load on one foot pays.

@@ -199,6 +199,36 @@ class GeometryTests(unittest.TestCase):
     cost = geo.foot_translation_cost(torch.tensor([[0.13, 0.5], [0.02, 0.02]]), torch.tensor([[1.0, 0.0], [1.0, 1.0]]), 0.03, 0.10)
     self.assertTrue(torch.allclose(cost, torch.tensor([0.5, 0.0])))
 
+  def test_foot_anchor_follows_lifted_feet_and_charges_planted_drift(self):
+    anchor = torch.zeros(1, 2, 2)
+    xy = torch.tensor([[[0.04, 0.0], [0.04, 0.0]]])
+    follow = torch.tensor([[False, True]])  # left planted, right lifted
+    anchor = geo.foot_anchor_update(anchor, xy, follow)
+    self.assertTrue(torch.allclose(anchor, torch.tensor([[[0.0, 0.0], [0.04, 0.0]]])))
+    cost = geo.foot_anchor_cost(xy, anchor, torch.ones(1, 2), 0.01, 0.02, 3.0)
+    self.assertAlmostEqual(cost.item(), 0.5 * 1.5, places=5)  # left drifted 4 cm, right re-anchored
+    far = geo.foot_anchor_cost(torch.tensor([[[0.5, 0.0], [0.0, 0.0]]]), torch.zeros(1, 2, 2), torch.ones(1, 2), 0.01, 0.02, 3.0)
+    self.assertAlmostEqual(far.item(), 1.5, places=5)  # capped at 3 per foot
+
+  def test_stance_offset_error_is_zero_at_the_default_place(self):
+    hips = torch.tensor([[[0.0, 0.05], [0.0, -0.05]]])
+    soles = hips + torch.tensor([[[0.0037, 0.0568], [0.0037, -0.0568]]])
+    fwd, lat = torch.tensor([[1.0, 0.0]]), torch.tensor([[0.0, 1.0]])
+    err = geo.stance_offset_error(soles, hips, fwd, lat, 0.0568, 0.0037)
+    self.assertTrue(torch.allclose(err, torch.zeros(1, 2), atol=1e-6))
+    wide = soles + torch.tensor([[[0.0, 0.04], [0.0, -0.04]]])  # both 4 cm further out
+    self.assertTrue(torch.allclose(geo.stance_offset_error(wide, hips, fwd, lat, 0.0568, 0.0037), torch.full((1, 2), 0.04)))
+
+  def test_stance_return_score_has_coarse_and_fine_kernels(self):
+    score = geo.stance_return_score(torch.tensor([0.0, 0.02, 0.088]), (0.02, 0.08))
+    self.assertAlmostEqual(score[0].item(), 1.0, places=6)
+    self.assertGreater(score[2].item(), 0.1)  # still a gradient 8.8 cm away
+    self.assertAlmostEqual(score[1].item(), 0.5 * math.exp(-1) + 0.5 * math.exp(-1 / 16), places=5)
+
+  def test_swing_credit_window(self):
+    credit = geo.swing_credit(torch.tensor([0.1, 0.3, 0.4, 0.6]), 0.3, 0.5)
+    self.assertTrue(torch.allclose(credit, torch.tensor([1.0, 1.0, 0.5, 0.0])))
+
   def test_rise_speed(self):
     cost = geo.rise_speed_cost(torch.tensor([0.1, 0.3, 2.0, -1.0]), 0.2, 0.1, 9.0)
     self.assertTrue(torch.allclose(cost, torch.tensor([0.0, 1.0, 9.0, 0.0])))
@@ -253,7 +283,8 @@ class ConfigTests(unittest.TestCase):
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
                  "style_one_foot_rise", "style_rise_speed", "target_torso_center_over_feet",
-                 "target_com_support_margin", "target_sole_contact_coverage", "style_loaded_foot_translation"):
+                 "target_com_support_margin", "target_sole_contact_coverage", "style_loaded_foot_translation",
+                 "style_standing_foot_anchor", "target_stance_return", "target_stable_standing"):
       self.assertNotEqual(getattr(s, name), 0.0)
       self.assertTrue(callable(getattr(StagedRecoveryEnv, "_reward_" + name.split("_", 1)[1])))
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
@@ -270,6 +301,7 @@ class ConfigTests(unittest.TestCase):
       "target_torso_center_over_feet": 4.0, "target_com_support": 6.0,
       "target_com_support_margin": 2.0, "target_stable_standing": -1.0,
       "style_loaded_foot_translation": -4.0, "style_loaded_sole_slip": -6.0,
+      "style_standing_foot_anchor": -4.0, "target_stance_return": 4.0,
     }
     for name, value in expected.items():
       self.assertEqual(getattr(s, name), value, name)

@@ -99,6 +99,21 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.ep_drag_dist = zeros(2)
     self.ep_move_load = zeros(2)
     self.ep_move_steps = zeros(2)
+    # After standing: anchors, swing exemption and stance return.
+    self.leg_joint_mask = torch.stack([
+      torch.tensor([j.startswith(f"{s}_") for j in self.dof_names], device=dev, dtype=torch.float32)
+      for s in ("l", "r")
+    ])  # (2, num_dof)
+    self.foot_anchor = zeros(2, 2)
+    self.foot_lifted = torch.zeros(n, 2, dtype=torch.bool, device=dev)
+    self.foot_air_time = zeros(2)
+    self.foot_down_time = zeros(2)
+    self.swing_exempt = zeros(2)
+    self.stance_err = zeros(2)
+    self.ep_swing_exempt_time = zeros()
+    self.ep_standing_lifts = zeros()
+    self.ep_anchor_drift = zeros()
+    self.ep_stance_err = zeros()
     self.ep_ready_before_rise = torch.zeros(n, dtype=torch.bool, device=dev)
     self.rise_gate = zeros()
     self.ep_rise_steps = zeros()
@@ -140,6 +155,40 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.sole_xy_prev.copy_(xy)
     self.sole_xy_valid.fill_(True)
     self.sole_clearance[:] = geo.sole_strip_points_world(foot_pos, foot_quat)[..., 2].amin(-1)
+    # Lifted feet, anchors and the default place of each foot (standing step adjustment).
+    force_l0, force_r0, _ = self._ground_support_forces()
+    forces = torch.stack((force_l0, force_r0), dim=1)
+    w = weight_of(self)[:, None]
+    was_lifted = self.foot_lifted.clone()
+    self.foot_lifted[:] = (self.sole_clearance >= cfg.lift_clearance_m) & (forces < cfg.lift_unloaded_weight_fraction * w)
+    standing_now = (self.root_states[:, 2] > cfg.anchor_stand_height_m) & (
+      -self.projected_gravity[:, 2] > cfg.anchor_stand_upright
+    )
+    self.ep_standing_lifts += (self.foot_lifted & ~was_lifted & standing_now[:, None]).float().sum(dim=1)
+    follow = self.foot_lifted | ~standing_now[:, None]
+    self.foot_anchor[:] = geo.foot_anchor_update(self.foot_anchor, xy, follow)
+    lateral = geo.lateral_axis(self.root_states[:, 3:7], foot_quat)
+    forward = torch.stack((lateral[:, 1], -lateral[:, 0]), dim=-1)
+    self.stance_err[:] = geo.stance_offset_error(
+      xy, d.body_link_pos_w[:, self.hip_body_indices, :2], forward, lateral,
+      cfg.stance_default_out_m, cfg.stance_default_fwd_m,
+    )
+    actuated_f = (self.real_episode_length_buf > self.unactuated_time)[:, None]
+    planted = forces >= cfg.swing_touchdown_weight_fraction * w
+    self.foot_down_time[:] = torch.where(planted, self.foot_down_time + self.dt, torch.zeros_like(self.foot_down_time))
+    # The swing timer grows while lifted, restarts only after a real touchdown, and
+    # is frozen during brief taps (no repeated short lifts to stay on one foot).
+    held = self.foot_down_time >= cfg.swing_touchdown_hold_s
+    self.foot_air_time[:] = torch.where(
+      self.foot_lifted & actuated_f, self.foot_air_time + self.dt,
+      torch.where(held | ~actuated_f, torch.zeros_like(self.foot_air_time), self.foot_air_time),
+    )
+    budget_left = (self.ep_swing_exempt_time < cfg.swing_budget_s).float()[:, None]
+    other_down = self.foot_lifted.flip(1).logical_not().float()
+    self.swing_exempt[:] = (
+      geo.swing_credit(self.foot_air_time, cfg.swing_free_s, cfg.swing_max_s) * self.foot_lifted * other_down * budget_left
+    )
+    self.ep_swing_exempt_time += self.swing_exempt.max(dim=1).values * self.dt * standing_now
     self.foot_hold[:] = geo.contact_load_hold(
       self.foot_hold, self.support_memory, self.sole_clearance < cfg.foot_translation_contact_clearance_m,
       math.exp(-self.dt / cfg.foot_translation_hold_decay_s),
@@ -158,7 +207,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     )
     delta = self.sole_centres[:, 0, :2] - self.sole_centres[:, 1, :2]
     self.stance_width[:] = torch.linalg.vector_norm(delta, dim=-1)
-    lateral = geo.lateral_axis(self.root_states[:, 3:7], foot_quat)
     self.foot_gap[:] = geo.foot_lateral_gap(corners, lateral)
     self.torso_lat_err[:] = geo.torso_lateral_error(self.root_states[:, :2], self.sole_centres[..., :2], lateral)
     self.foot_flat[:] = 1.0 - _sole_tilt_cost(foot_quat, self.cfg.safe_recovery.sole_tilt_sigma_rad)
@@ -255,6 +303,10 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     )
     self.ep_move_load += torch.stack((fl, fr), dim=1) / weight[:, None] * moving
     self.ep_move_steps += moving.float()
+    self.ep_anchor_drift += torch.linalg.vector_norm(
+      self.sole_centres[..., :2] - self.foot_anchor, dim=-1
+    ).mean(dim=1) * standing
+    self.ep_stance_err += self.stance_err.mean(dim=1) * standing
     err_mask = actuated & (self.lift_gate > 0.5) & torch.isfinite(self.com_outside)
     self.ep_com_err += torch.where(err_mask, self.com_outside, torch.zeros_like(self.com_outside))
     self.ep_com_err_steps += err_mask.float()
@@ -409,7 +461,33 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     body_ids = self.robot.indexing.body_ids.long()
     weight = self.sim.model.body_mass[:, body_ids].sum(dim=1) * abs(self.cfg.sim.gravity[2])
     cost = geo.load_imbalance_cost(left, right, weight, self.cfg.staged.load_imbalance_floor_weight_fraction)
+    # A short step (one foot lifted, the other planted) is exempt.
+    return cost * self._standing_gate() * (1.0 - self.swing_exempt.max(dim=1).values)
+
+  def _reward_stable_standing(self):
+    # host_safe_recovery's standing motion cost, without the joints of a leg that
+    # is in an exempt short swing (its own motion is the step).
+    sr = self.cfg.safe_recovery
+    mask = 1.0 - self.swing_exempt @ self.leg_joint_mask  # (N, num_dof)
+    motion = sr.stable_joint_velocity_weight * (mask * self.dof_vel.square()).sum(1) / self.num_dof
+    motion += sr.stable_base_angular_velocity_weight * self.base_ang_vel.square().sum(1)
+    boost = self._standing_penalty_boost(sr.standing_motion_penalty_multiplier)
+    return boost * self._standing_gate() * motion
+
+  def _reward_standing_foot_anchor(self):
+    cfg = self.cfg.staged
+    cost = geo.foot_anchor_cost(
+      self.sole_centres[..., :2], self.foot_anchor, self.foot_hold,
+      cfg.anchor_deadband_m, cfg.anchor_scale_m, cfg.anchor_cost_cap,
+    )
     return cost * self._standing_gate()
+
+  def _reward_stance_return(self):
+    # Each planted foot near its default place under its hip (task space).
+    cfg = self.cfg.staged
+    planted = (self.sole_clearance < cfg.foot_translation_contact_clearance_m).float()
+    near = geo.stance_return_score(self.stance_err, cfg.stance_return_sigma_m)
+    return self._standing_gate() * (planted * near).mean(dim=1)
 
   def _reward_knee_load_support(self):
     cfg = self.cfg.staged
@@ -516,6 +594,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     s["standing_com_margin_m"] = (
       self.ep_stand_margin[env_ids].sum() / self.ep_stand_margin_steps[env_ids].sum().clamp_min(1.0)
     )
+    s["standing_lifts_per_ep"] = self.ep_standing_lifts[env_ids].mean()
+    s["standing_swing_exempt_s"] = self.ep_swing_exempt_time[env_ids].mean()
+    s["standing_anchor_drift_m"] = (self.ep_anchor_drift[env_ids] / steps).mean()
+    s["standing_stance_offset_err_m"] = (self.ep_stance_err[env_ids] / steps).mean()
+    s["final_stance_offset_err_m"] = self.stance_err[env_ids].mean()
     s["peak_hip_roll_rad"] = self.ep_peak_hip_roll[env_ids].mean()
     s["loaded_foot_translation"] = (
       self.ep_translation_cost[env_ids] / self.ep_actuated_steps[env_ids].clamp_min(1.0)
@@ -540,6 +623,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     if len(env_ids):
       self.com_prev_valid[env_ids] = False
       self.sole_xy_valid[env_ids] = False
+      self.foot_lifted[env_ids] = False
       self.knee_time[env_ids] = 0
       for buf in (self.t_feet, self.t_com, self.t_rise):
         buf[env_ids] = -1.0
@@ -556,5 +640,7 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
                   self.ep_stand_min_cov, self.ep_stand_cov90, self.ep_stand_torso_err,
                   self.ep_stand_margin, self.ep_stand_margin_steps, self.foot_hold,
                   self.ep_peak_hip_roll, self.ep_translation_cost, self.ep_actuated_steps,
-                  self.ep_drag_dist, self.ep_move_load, self.ep_move_steps):
+                  self.ep_drag_dist, self.ep_move_load, self.ep_move_steps,
+                  self.foot_air_time, self.foot_down_time, self.swing_exempt, self.ep_swing_exempt_time,
+                  self.ep_standing_lifts, self.ep_anchor_drift, self.ep_stance_err):
         buf[env_ids] = 0.0
