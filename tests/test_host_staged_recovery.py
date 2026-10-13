@@ -336,7 +336,7 @@ class ConfigTests(unittest.TestCase):
     st = StagedRecoveryCfg.staged
     self.assertEqual((st.stance_start_prob, st.drag_termination_start_m, st.drag_termination_final_m), (0.15, 0.20, 0.06))
     self.assertFalse(st.drag_termination)
-    self.assertEqual(st.action_scale_floor, 0.30)
+    self.assertEqual(st.action_scale_floor, 0.25)
     active = [n for n in dir(s) if not n.startswith("_") and getattr(s, n) != 0]
     functions = [n.split("_", 1)[1] for n in active]
     self.assertEqual(len(functions), len(set(functions)), "a reward function is registered twice")

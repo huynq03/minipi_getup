@@ -96,9 +96,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # run 20261013_123752 it ended 40-70% of episodes once active (iteration ~1200),
     # before the policy could step, and fallen-start success fell from 0.95 to 0.06.
     drag_termination = False
-    # Action-scale curriculum floor: the inherited schedule goes down to 0.25 on
-    # head height alone; at 0.24 the same run could no longer get up or step.
-    action_scale_floor = 0.30
+    # Action-scale curriculum floor lowered to 0.25 at the user's request.
+    action_scale_floor = 0.25
     drag_termination_start_m = 0.20
     drag_termination_final_m = 0.06
     # Stance starts: this share of resets begin standing in a displaced stance
