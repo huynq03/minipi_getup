@@ -419,3 +419,24 @@ Evaluation and playback disable the drag termination and the stance starts.
 | Feet slide (old policy) | 6.6 cm, `post_stand_drag` 7.4 cm |
 | Anchor cost | about ×2.5 |
 | Lifts | 0 |
+
+### 6a, after standing (3): no drag termination, action-scale floor 0.30
+
+Run `20261013_123752_rev6a` collapsed after iteration ~1200:
+
+| Iteration | 1100 | 1600 | ~1635 |
+|---|---:|---:|---:|
+| Fallen-start success | 0.95 | 0.51 | 0.06 |
+| Action scale | 0.47 | 0.26 | 0.24 |
+
+- Once the success curriculum started, the drag termination (limit about 16–20 cm) ended 40–70% of
+  episodes, together with the tightening velocity termination (up to 37%). The policy had not yet
+  learned to step, so standing up became the risky action.
+- Meanwhile the inherited action-scale schedule kept lowering the scale on head height alone.
+
+Changes:
+- `drag_termination = False`.
+- `action_scale_floor = 0.30`: `update_force_curriculum` clamps `action_rescale` from below.
+
+Training resumes from `model_1100` of that run (fallen success 0.95, stance error ~2 cm, no jitter).
+The anchor escalation, step placement reward and 15% stance starts stay.

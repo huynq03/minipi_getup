@@ -92,8 +92,13 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     step_gain_scale_m = 0.02
     step_gain_cap = 3.0
     # Post-stand loaded sliding per foot that ends the episode (training only): off
-    # until the success curriculum starts, then start -> final metres.
-    drag_termination = True
+    # until the success curriculum starts, then start -> final metres. Disabled: in
+    # run 20261013_123752 it ended 40-70% of episodes once active (iteration ~1200),
+    # before the policy could step, and fallen-start success fell from 0.95 to 0.06.
+    drag_termination = False
+    # Action-scale curriculum floor: the inherited schedule goes down to 0.25 on
+    # head height alone; at 0.24 the same run could no longer get up or step.
+    action_scale_floor = 0.30
     drag_termination_start_m = 0.20
     drag_termination_final_m = 0.06
     # Stance starts: this share of resets begin standing in a displaced stance

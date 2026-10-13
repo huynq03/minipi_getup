@@ -586,6 +586,11 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.actuated_peak_vel = torch.maximum(self.actuated_peak_vel, peak)
 
   # ------------------------------------------------------------------ resets
+  def update_force_curriculum(self, env_ids):
+    super().update_force_curriculum(env_ids)
+    floor = self.cfg.staged.action_scale_floor
+    self.action_rescale[env_ids] = self.action_rescale[env_ids].clamp_min(floor)
+
   def _penalty_ema_ids(self, env_ids):
     # Stance starts begin on their feet; they must not advance the curriculum.
     return env_ids[~self.stance_start[env_ids]]
