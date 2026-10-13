@@ -48,6 +48,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     stance_gap_scale_m = 0.03
     stance_width_scale_m = 0.08
     stance_cost_cap = 4.0
+    # Stance cost while rising (not yet standing), as a fraction of the standing cost.
+    stance_rise_fraction = 0.25
     # Standing load split; the floor keeps the ratio finite while unloaded.
     load_imbalance_floor_weight_fraction = 0.1
     # Leg-on-leg contact: 0.5% W deadband, saturating with a 5% W scale (~3.4 N).
@@ -55,11 +57,13 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     leg_contact_scale_weight_fraction = 0.05
     # Revision tag, recorded in the run metadata (config.json).
     revision = "6a"
-    # Rising credit = floor + (1 - floor) * ready, with
+    # Rising credit = floor + w * support_gate + (1 - floor - w) * ready, with
     # ready = sqrt(coverage_pair * com_score) * support_gate (revision 6a):
     # both soles planted, COM over their support polygon, both feet loaded
     # (weaker foot >= two_foot_full_share of the load).
     height_credit_com_floor = 0.2
+    # Intermediate step: credit = 0.2 + 0.3 * support_gate + 0.5 * ready.
+    height_credit_two_foot_weight = 0.3
     two_foot_full_share = 0.3
     # Sole coverage is geometric (revision 6a): strip end points within this
     # clearance of the ground, times a foot-load gate 1 - exp(-relu(F - d W) / (s W)).

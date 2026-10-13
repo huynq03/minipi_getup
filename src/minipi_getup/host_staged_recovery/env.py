@@ -10,6 +10,7 @@ from mjlab.sensor import ContactMatch, ContactSensor, ContactSensorCfg
 from minipi_getup.host.env import torch_rand_float
 from minipi_getup.host_safe_recovery.env import (
   SafeRecoveryEnv,
+  _loaded_coverage_deficit,
   _saturating_support,
   _sole_tilt_cost,
 )
@@ -348,7 +349,26 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
       cfg.stance_gap_scale_m, cfg.stance_width_scale_m, cfg.stance_cost_cap,
     )
     # Gate on either foot: one foot resting on or crossing the other also pays.
-    return cost * torch.maximum(left, right) * self.lift_gate
+    # Relaxed while rising so a second foot may land close and be adjusted later;
+    # full once standing (revision 6a).
+    phase = cfg.stance_rise_fraction + (1.0 - cfg.stance_rise_fraction) * self._standing_gate()
+    return cost * torch.maximum(left, right) * self.lift_gate * phase
+
+  def _settled_foot_load(self):
+    """Per-foot load weight for sole-quality costs: current normalized support
+    times support_memory, so a foot that has just touched down is not charged
+    in full before it can settle (revision 6a)."""
+    left, right, _ = self._normalized_supports()
+    return torch.stack((left, right), dim=1) * self.support_memory
+
+  def _reward_loaded_sole_coverage_deficit(self):
+    return _loaded_coverage_deficit(
+      self.sole_cov, self._settled_foot_load(), self.cfg.safe_recovery.loaded_sole_min_coverage
+    )
+
+  def _reward_loaded_sole_tilt(self):
+    # foot_flat = 1 - tilt cost (same sigma as host_safe_recovery).
+    return (self._settled_foot_load() * (1.0 - self.foot_flat)).mean(dim=1)
 
   def _reward_unsupported_ascent(self):
     cfg = self.cfg.staged
@@ -399,8 +419,10 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     return super()._reward_knee_load_support() * ramp
 
   def _com_height_credit(self):
-    floor = self.cfg.staged.height_credit_com_floor
-    return floor + (1.0 - floor) * self.ready
+    # Intermediate step (revision 6a): both feet carrying load already earns part
+    # of the credit; the rest needs the full readiness (planted soles, COM support).
+    cfg = self.cfg.staged
+    return geo.height_credit(self.support_gate, self.ready, cfg.height_credit_com_floor, cfg.height_credit_two_foot_weight)
 
   def _knee_height_credit(self):
     # Used by head height (task) and target base height: rising credit needs the

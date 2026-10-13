@@ -135,6 +135,12 @@ class GeometryTests(unittest.TestCase):
     half = geo.rise_ready_score(torch.tensor([0.25]), torch.tensor([1.0]), torch.tensor([1.0]))
     self.assertAlmostEqual(half.item(), 0.5, places=6)  # geometric mean of coverage and COM support
 
+  def test_height_credit_has_an_intermediate_two_foot_step(self):
+    gate = torch.tensor([0.0, 1.0, 1.0, 0.1])
+    ready = torch.tensor([0.0, 0.0, 1.0, 0.1])
+    credit = geo.height_credit(gate, ready, 0.2, 0.3)
+    self.assertTrue(torch.allclose(credit, torch.tensor([0.2, 0.5, 1.0, 0.28])))  # one foot / both / ready
+
   def test_coverage_pair_weights_the_worse_sole(self):
     pair = geo.coverage_pair_score(torch.tensor([1.0, 1.0, 0.5]), torch.tensor([1.0, 0.0, 0.5]), 0.3)
     self.assertTrue(torch.allclose(pair, torch.tensor([1.0, 0.15, 0.5])))
@@ -268,6 +274,8 @@ class ConfigTests(unittest.TestCase):
     for name, value in expected.items():
       self.assertEqual(getattr(s, name), value, name)
     self.assertEqual(StagedRecoveryCfg.staged.height_credit_com_floor, 0.2)
+    self.assertEqual(StagedRecoveryCfg.staged.height_credit_two_foot_weight, 0.3)
+    self.assertEqual(StagedRecoveryCfg.staged.stance_rise_fraction, 0.25)
     self.assertEqual(StagedRecoveryCfg.staged.revision, "6a")
     self.assertFalse(hasattr(StagedRecoveryCfg.staged, "ready_com_centre_sigma_m"))
     active = [n for n in dir(s) if not n.startswith("_") and getattr(s, n) != 0]

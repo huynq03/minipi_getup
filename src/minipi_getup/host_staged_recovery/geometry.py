@@ -212,6 +212,12 @@ def rise_ready_score(coverage_pair, com_score, support_gate):
   return torch.sqrt((coverage_pair * com_score).clamp_min(0.0)) * support_gate
 
 
+def height_credit(support_gate, ready, floor, two_foot_weight):
+  """floor + two_foot_weight * support_gate + rest * ready. ready <= support_gate,
+  so the credit rises in steps: one foot -> both feet loaded -> fully ready."""
+  return floor + two_foot_weight * support_gate + (1.0 - floor - two_foot_weight) * ready
+
+
 def torso_lateral_error(torso_xy, foot_xy, lateral):
   """|lateral offset| of the torso from the midpoint of the two feet, along the
   robot lateral axis. torso_xy (N, 2), foot_xy (N, 2, 2), lateral (N, 2)."""

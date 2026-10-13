@@ -295,7 +295,28 @@ Both are logged separately.
 - Now: `ready = sqrt(coverage_pair · com_score) · support_gate`. The COM-centring factor is dropped;
   `ready_com_centre_sigma_m` is removed.
 - Height credit (head height, target base height, foot-supported height): `0.05 + 0.95·ready` →
-  **`0.2 + 0.8·ready`**.
+  **`0.2 + 0.3·support_gate + 0.5·ready`**.
+
+**Intermediate steps from one foot to two.** The first 6a run, at `model_200`, rose on one foot in 48%
+of rising steps and on two in 8%. Per rising step, style + target favoured two feet by only +0.14:
+
+- The one-foot penalty was worth +0.195.
+- A freshly loaded, tilted, close-placed second foot immediately paid stance width, coverage
+  deficit, tilt, posture and translation, about −0.25 in total.
+- The ready-based rewards paid almost nothing until both soles were planted exactly (ready 0.015).
+- The height credit was 0.200 on one foot vs 0.212 on two.
+
+Changes:
+
+- **Height credit:** both feet carrying load already earns +0.3 (`support_gate`, smooth). Full
+  readiness adds the remaining 0.5. Since `ready ≤ support_gate`, the steps are 0.2 (one foot) → 0.5
+  (both loaded) → 1.0 (ready).
+- **Settled load:** `loaded_sole_coverage_deficit` and `loaded_sole_tilt` are weighted by
+  `sup · support_memory` instead of `sup`. A foot that has just touched down is not charged in full
+  before it settles: `support_memory` rises with τ = 0.1 s.
+- **Rising stance:** `stance_width` is ×0.25 while rising, ramping to ×1 with the standing gate. A
+  second foot may land close to the first and be adjusted. `leg_contact` (−6) still charges legs
+  that press on each other.
 
 **Monitors** (`Episode_end/`, over standing steps):
 - `standing_min_sole_coverage`;
