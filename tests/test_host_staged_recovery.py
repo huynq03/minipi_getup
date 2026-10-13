@@ -27,6 +27,49 @@ def two_feet(y_left, y_right, yaw_left=0.0, yaw_right=0.0):
 
 
 class GeometryTests(unittest.TestCase):
+  def test_contact_slip_counts_light_contact_but_not_air_or_vertical_motion(self):
+    linear = torch.tensor([[[.11, 0., 0.], [10., 0., 0.]],
+                           [[0., 0., 2.], [0., 0., 0.]],
+                           [[0., 0., 0.], [0., 0., 0.]]])
+    angular = torch.zeros_like(linear)
+    offset = torch.zeros_like(linear)
+    angular[2, 0, 2] = 1.
+    offset[2, 0, 0] = .11
+    found = torch.tensor([[1, 0], [1, 0], [1, 0]])
+    cost = geo.contact_slip_cost(linear, angular, offset, found, .01, .1)
+    self.assertTrue(torch.allclose(cost, torch.tensor([1., 0., 1.]), atol=1e-6))
+    self.assertTrue(torch.equal(geo.contact_slip_cost(linear, angular, offset, found * 0, .01, .1), torch.zeros(3)))
+
+  def test_torso_over_com_prefers_upright_centred_preparation(self):
+    env = object.__new__(StagedRecoveryEnv)
+    env.cfg = StagedRecoveryCfg()
+    env.root_states = torch.zeros(5, 13)
+    env.com_w = torch.zeros(5, 3)
+    env.com_w[1, 0] = .06
+    env.projected_gravity = torch.tensor([[0., 0., -1.], [0., 0., -1.],
+                                         [1., 0., 0.], [0., 0., -1.], [0., 0., -1.]])
+    env.unactuated_time = 30
+    env.real_episode_length_buf = torch.tensor([31, 31, 31, 30, 31])
+    env._standing_gate = lambda: torch.tensor([0., 0., 0., 0., 1.])
+    want = torch.tensor([1., math.exp(-1), 0., 0., 0.])
+    self.assertTrue(torch.allclose(env._reward_torso_over_com(), want, atol=1e-6))
+
+  def test_feet_distance_cost_threshold_growth_and_passive_phase(self):
+    env = object.__new__(StagedRecoveryEnv)
+    env.cfg = StagedRecoveryCfg()
+    env.unactuated_time = 30
+    env.real_episode_length_buf = torch.tensor([31, 31, 31, 31, 30])
+    env.sole_centres = torch.zeros(5, 2, 3)
+    env.sole_centres[:, 1, 0] = torch.tensor([.39, .40, .45, .50, .60])
+    self.assertTrue(torch.allclose(env._reward_feet_distance(), torch.tensor([0., 0., .5, 1., 0.]), atol=1e-6))
+    # Height separation counts too, even when the feet are not both grounded.
+    env.sole_centres[0, 1] = torch.tensor([.30, 0., .40])
+    self.assertAlmostEqual(env._reward_feet_distance()[0].item(), 1., places=5)
+    self.assertEqual(env.cfg.constraints.scales.style_feet_distance, -400.)
+    contribution = env._reward_feet_distance() * env.cfg.constraints.scales.style_feet_distance * 0.02
+    self.assertAlmostEqual(contribution[2].item(), -4., places=5)
+    self.assertAlmostEqual(contribution[3].item(), -8., places=5)
+
   def test_sole_corners_lie_on_ground_for_flat_foot(self):
     corners, _ = two_feet(0.08, -0.08)
     self.assertTrue(torch.allclose(corners[..., 2], torch.zeros(1, 2, 4), atol=1e-6))
@@ -279,25 +322,26 @@ class TerminationTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-  def test_asset_is_pinned_hip120_with_left_right_shells(self):
+  def test_asset_is_pinned_v2_without_extra_shells(self):
     self.assertEqual(asset_sha256(), EXPECTED_ASSET_SHA256)
+    self.assertEqual(ASSET_XML.name, "cl_pai_v2.xml")
     text = ASSET_XML.read_text()
-    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="2" conaffinity="12"'), 2)
-    self.assertEqual(text.count('_shell_collision" class="collision" type="box" contype="4" conaffinity="10"'), 2)
-    self.assertIn('l_foot_shell_collision" class="collision" type="box" contype="66" conaffinity="12"', text)
-    self.assertIn('r_foot_shell_collision" class="collision" type="box" contype="132" conaffinity="10"', text)
-    self.assertIn('l_hip_shell_collision" class="collision" type="box" contype="16" conaffinity="64"', text)
-    self.assertIn('r_hip_shell_collision" class="collision" type="box" contype="32" conaffinity="128"', text)
-    self.assertEqual(text.count('name="base_shell_collision" class="collision" type="box" contype="8" conaffinity="6"'), 1)
-    self.assertEqual(text.count('range="-1.25 1.75"'), 2)
-    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-2.5 1.65"'), 2)
-    self.assertIn('r_thigh_joint" pos="0 0 0" axis="0 0 1" range="-0.28 0.3"', text)
-    self.assertIn('l_thigh_joint" pos="0 0 0" axis="0 0 1" range="-0.3 0.28"', text)
-    self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.12 2.0943951023931953"', text)
+    self.assertNotIn('_shell_collision', text)
+    self.assertIn('name="base_host_collision"', text)
+    for side in ("l", "r"):
+      for strip in range(1, 6):
+        self.assertIn(f'name="{side}_foot{strip}_collision"', text)
+    self.assertEqual(text.count('hip_pitch_joint" pos="0 0 0" axis="0 1 0" range="-2.28 2.83"'), 2)
+    self.assertEqual(text.count('calf_joint" pos="0 0 0" axis="0 1 0" range="-2.50 1.39"'), 2)
+    self.assertEqual(text.count('thigh_joint" pos="0 0 0" axis="0 0 1" range="-2.45 2.45"'), 2)
+    self.assertEqual(text.count('ankle_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.43 1.30"'), 2)
+    self.assertEqual(text.count('ankle_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.70 0.70"'), 2)
+    self.assertIn('l_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.13 2.71"', text)
+    self.assertIn('r_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-2.71 0.13"', text)
 
   def test_no_joint_strategy_rewards_and_pipeline_terms_registered(self):
     s = StagedRecoveryCfg.constraints.scales
-    for name in ("target_loaded_knee_flexion", "target_knee_sole_progress", "target_recovery_hip_roll",
+    for name in ("target_loaded_knee_flexion", "target_knee_sole_progress",
                  "style_loaded_hip_roll_excess", "style_loaded_knee_hyperextension", "regu_joint_overspeed",
                  "style_hip_roll_deviation"):
       self.assertEqual(getattr(s, name), 0.0, name)
@@ -305,7 +349,7 @@ class ConfigTests(unittest.TestCase):
                  "style_stance_width", "style_unsupported_ascent", "style_standing_knee_extension",
                  "style_joint_overspeed", "style_standing_load_imbalance", "style_leg_contact",
                  "style_one_foot_rise", "style_rise_speed", "target_torso_center_over_feet",
-                 "target_com_support_margin", "target_sole_contact_coverage", "style_loaded_foot_translation",
+                 "target_com_support_margin", "target_torso_over_com", "target_sole_contact_coverage", "style_loaded_foot_translation",
                  "style_standing_foot_anchor", "target_stance_return", "target_stable_standing",
                  "target_step_placement"):
       self.assertNotEqual(getattr(s, name), 0.0)
@@ -313,17 +357,17 @@ class ConfigTests(unittest.TestCase):
     self.assertEqual(StagedRecoveryCfg.safe_recovery.evaluation_ceiling_rad_s, 6.0)
     self.assertEqual(StagedRecoveryCfg.safe_recovery.overspeed_soft_rad_s, 3.0)
     self.assertEqual(StagedRecoveryCfg.staged.motor_max_speed_rad_s, 4.0)
-    self.assertEqual(StagedRecoveryCfg.curriculum.force, 40)
+    self.assertEqual(StagedRecoveryCfg.curriculum.force, 30)
     self.assertFalse(hasattr(StagedRecoveryCfg.staged, "force_requires_com"))
 
   def test_revision_13_scales_and_unique_reward_functions(self):
     s = StagedRecoveryCfg.constraints.scales
     expected = {
-      "target_sole_contact_coverage": 8.0, "style_loaded_sole_coverage_deficit": -10.0,
+      "target_sole_contact_coverage": 12.0, "style_loaded_sole_coverage_deficit": -10.0,
       "style_loaded_sole_tilt": -8.0, "target_two_foot_flat_support": 6.0,
       "target_torso_center_over_feet": 4.0, "target_com_support": 6.0,
       "target_com_support_margin": 2.0, "target_stable_standing": -1.0,
-      "style_loaded_foot_translation": -4.0, "style_loaded_sole_slip": -6.0,
+      "style_loaded_foot_translation": -4.0, "style_loaded_sole_slip": -12.0,
       "style_standing_foot_anchor": -4.0, "target_stance_return": 4.0, "target_step_placement": 100.0,
     }
     for name, value in expected.items():

@@ -1,7 +1,7 @@
 # Training the staged-recovery policy on another machine
 
 This explains how to clone the `host-only` branch and train the HoST Mini-Pi staged-recovery policy
-(revision 13) on any Linux machine with an NVIDIA GPU. The branch contains everything a run needs:
+(Mini-Pi v2, with the revision-13 reward pipeline extended) on a Linux machine with an NVIDIA GPU. The branch contains everything a run needs:
 the code, the robot asset (XML and meshes), `uv.lock` and the launch scripts. Only checkpoints
 (`*.pt`) and logs are not tracked.
 
@@ -30,7 +30,7 @@ distributions need nothing extra.
 **Check the install:**
 
 ```bash
-.venv/bin/python -m unittest tests.test_host_staged_recovery tests.test_host_safe_recovery   # 62 tests
+.venv/bin/python -m unittest discover -s tests -p 'test_host*recovery.py'
 ```
 
 ## 2. Train
@@ -39,7 +39,7 @@ Run inside tmux so the run survives a closed terminal:
 
 ```bash
 tmux new -s host_train
-tools/train_host_staged.sh                 # from scratch: 4096 envs, 8000 iterations, run name rev13
+tools/train_host_staged.sh -n 1024 -i 8000 -N clpai_v2_contact  # from scratch
 ```
 
 The script has these options:
@@ -65,14 +65,17 @@ The script has these options:
 - the package has uncommitted changes (commit first: the run records its commit);
 - the GPU is busy (use `-b`).
 
-### Resuming the tracked rev13 checkpoint
+### Current v2 asset and historical checkpoints
 
-`checkpoints/rev13/model_1100.pt` is in the repository. See `checkpoints/rev13/README.md` for where it
-comes from and how it behaves.
+Training now uses `cl_pai_v2.xml` with hardware-based joint ranges and no extra
+shell collision geoms. Initial pull assistance is 30 N. Rewards add torso near
+whole-body COM, all-stage sole contact slip, stronger sole coverage, and a linear
+feet-separation penalty above 0.4 m (45 cm: -4, 50 cm: -8 per policy step).
+These are soft objectives; there is no forced sitting-to-standing stage.
 
-```bash
-tools/train_host_staged.sh -r checkpoints/rev13/model_1100.pt -i 8000 -N rev13_from1100
-```
+`checkpoints/rev13/model_1100.pt` is historical and remains available in the
+repository, but its asset hash differs from v2. It cannot resume through the
+current v2 entrypoint. Use checkpoints from the same v2 asset hash for new runs.
 
 ### Resuming a checkpoint from another machine
 
@@ -83,8 +86,7 @@ scp user@host:/path/to/logs/host_staged_recovery/<run>/model_1100.pt ckpt/
 tools/train_host_staged.sh -r ckpt/model_1100.pt -i 8000 -N rev13_from1100
 ```
 
-A checkpoint resumes only with the same variant and the same robot asset hash. The tracked XML is
-the one every revision-13 checkpoint was trained with, so this holds.
+A checkpoint resumes only with the same variant and the same robot asset hash. The v2 XML hash is different from historical revision-13 checkpoints; do not override the guard to treat them as compatible.
 
 ## 3. Monitor
 

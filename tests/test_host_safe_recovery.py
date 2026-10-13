@@ -94,7 +94,7 @@ class RewardTests(unittest.TestCase):
     self.assertTrue(torch.allclose(cost, torch.tensor([1., 0., 0., 0.])))
     scales = SafeRecoveryCfg.constraints.scales
     self.assertLess(scales.style_loaded_hip_roll_excess, 0)
-    self.assertEqual(scales.target_recovery_hip_roll, 0.0)
+    self.assertFalse(hasattr(scales, "target_recovery_hip_roll"))
     self.assertTrue(callable(SafeRecoveryEnv._reward_loaded_hip_roll_excess))
 
   def test_scale_finetuning_only_reduces_successful_unassisted_envs(self):
@@ -344,32 +344,6 @@ class RewardTests(unittest.TestCase):
     cost = env._reward_knee_load_support()
     self.assertGreater(cost[1], cost[0])
     self.assertTrue(torch.all((cost >= 0) & (cost <= 1)))
-
-  def test_recovery_hip_roll_requires_same_sole_progress_and_fades_in_standing(self):
-    env = self.make_env()
-    env.cfg = SafeRecoveryCfg()
-    env.device = "cpu"
-    env.recovery_hip_roll_indices = torch.tensor([0, 1])
-    env.previous_contact_hip_roll = torch.zeros(2, 2)
-    env.previous_hip_sole_coverage = torch.zeros(2, 2)
-    env.hip_contact_progress_valid = torch.zeros(2, dtype=torch.bool)
-    coverage = torch.zeros(2, 2)
-    env._sole_coverage = lambda: coverage
-    self.assertTrue(torch.equal(env._reward_recovery_hip_roll(), torch.zeros(2)))
-    env.dof_pos[:, :2] = torch.tensor([0.04, -0.04])
-    coverage[0] += 0.2
-    reward = env._reward_recovery_hip_roll()
-    self.assertGreater(reward[0], 0)
-    self.assertEqual(reward[1], 0)  # opening without improved contact
-    self.assertTrue(torch.equal(env._reward_recovery_hip_roll(), torch.zeros(2)))
-    env.dof_pos[:, :2] += torch.tensor([0.04, -0.04])
-    coverage[:] += 0.2
-    env.root_states[:, 2] = 0.4
-    env.projected_gravity[:] = torch.tensor([0.0, 0.0, -1.0])
-    self.assertLess(env._reward_recovery_hip_roll()[0], reward[0])
-    env.dof_pos[:, :2] -= torch.tensor([0.04, -0.04])
-    coverage[:] += 0.2
-    self.assertTrue(torch.equal(env._reward_recovery_hip_roll(), torch.zeros(2)))
 
   def test_height_credit_reduces_knee_dominance_but_preserves_floor(self):
     env = self.make_env()

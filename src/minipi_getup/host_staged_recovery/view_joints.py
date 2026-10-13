@@ -15,6 +15,7 @@ import time
 
 import mujoco
 import numpy as np
+import trimesh
 import viser
 
 from minipi_getup.host_staged_recovery.asset import ASSET_XML
@@ -89,6 +90,7 @@ def main() -> None:
   for g in range(m.ngeom):
     is_mesh = m.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH
     is_box = m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX and m.geom_contype[g] != 0
+    is_capsule = m.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE and m.geom_contype[g] != 0
     if is_mesh:
       mid = m.geom_dataid[g]
       verts = m.mesh_vert[m.mesh_vertadr[mid]: m.mesh_vertadr[mid] + m.mesh_vertnum[mid]]
@@ -101,6 +103,12 @@ def main() -> None:
       h = server.scene.add_box(f"/robot/box_{g}", dimensions=2 * m.geom_size[g], color=color,
                                opacity=0.35, visible=False)
       handles.append((g, h, True))
+    elif is_capsule:
+      mesh = trimesh.creation.capsule(radius=float(m.geom_size[g, 0]),
+                                      height=float(2 * m.geom_size[g, 1]))
+      h = server.scene.add_mesh_simple(f"/robot/capsule_{g}", mesh.vertices, mesh.faces,
+                                       color=(80, 200, 255), opacity=0.35, visible=False)
+      handles.append((g, h, True))
 
   hinge = [j for j in range(m.njnt) if m.jnt_type[j] == mujoco.mjtJoint.mjJNT_HINGE]
   names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, j) for j in hinge]
@@ -108,7 +116,7 @@ def main() -> None:
   ik_joints = [f"{s}_{k}_joint" for s in ("l", "r") for k in ("hip_pitch", "ankle_pitch")]
   readout = server.gui.add_markdown("")
   planted = server.gui.add_checkbox("Feet planted (IK: base, hip pitch, ankle pitch follow)", True)
-  show_coll = server.gui.add_checkbox("Show collision boxes (orange = shells)", False)
+  show_coll = server.gui.add_checkbox("Show collisions (orange = shells, blue = ground geoms)", False)
   link = server.gui.add_checkbox("Mirror left/right calf", True)
   sliders = {}
   for j, n in zip(hinge, names, strict=True):
