@@ -9,23 +9,13 @@ from minipi_getup.host_safe_recovery.config import SafeRecoveryCfg, SafeRecovery
 
 
 class StagedRecoveryCfg(SafeRecoveryCfg):
-  class curriculum(SafeRecoveryCfg.curriculum):
-    force = 30.0
-
   class safe_recovery(SafeRecoveryCfg.safe_recovery):
-    sole_slip_soft_m_s = 0.01
     # Hardware velocity requirement: |qd| < 6 rad/s.
     evaluation_ceiling_rad_s = 6.0
     # Overspeed cost starts here (was 4): slow, deliberate motion.
     overspeed_soft_rad_s = 3.0
 
   class staged:
-    # Horizontal torso origin vs whole-body COM; reward upright preparation.
-    torso_com_sigma_m = 0.06
-    torso_com_upright_min = 0.65
-    # Full 3D sole-centre distance; strong cost above 40 cm during actuation.
-    feet_distance_max_m = 0.40
-    feet_distance_excess_scale_m = 0.10
     # Motor torque-speed limit (accelerating torque fades to 0 at the max speed).
     # 4 rad/s (was 6): leaves a 2 rad/s margin below the 6 rad/s hardware limit.
     motor_max_speed_rad_s = 4.0
@@ -60,6 +50,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     stance_cost_cap = 4.0
     # Stance cost while rising (not yet standing), as a fraction of the standing cost.
     stance_rise_fraction = 0.25
+    # Narrower rise (after model_1100): outward hip roll above this costs while rising.
+    rise_hip_roll_soft_rad = 0.8
     # Standing load split; the floor keeps the ratio finite while unloaded.
     load_imbalance_floor_weight_fraction = 0.1
     # Leg-on-leg contact: 0.5% W deadband, saturating with a 5% W scale (~3.4 N).
@@ -78,8 +70,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # Sole coverage is geometric (revision 13): strip end points within this
     # clearance of the ground, times a foot-load gate 1 - exp(-relu(F - d W) / (s W)).
     sole_coverage_tolerance_m = 0.003
-    sole_coverage_load_deadband_weight_fraction = 0.005
-    sole_coverage_load_scale_weight_fraction = 0.005
+    sole_coverage_load_deadband_weight_fraction = 0.01
+    sole_coverage_load_scale_weight_fraction = 0.05
     # Loaded foot translation (revision 13): horizontal sole-centre speed above the
     # threshold, gated by a load hold that decays with this time constant while
     # the sole stays within the contact clearance, and resets once it is lifted.
@@ -106,8 +98,9 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # run 20261013_123752 it ended 40-70% of episodes once active (iteration ~1200),
     # before the policy could step, and fallen-start success fell from 0.95 to 0.06.
     drag_termination = False
-    # Action-scale curriculum floor lowered to 0.25 at the user's request.
-    action_scale_floor = 0.25
+    # Action-scale curriculum floor: the inherited schedule goes down to 0.25 on
+    # head height alone; at 0.24 the same run could no longer get up or step.
+    action_scale_floor = 0.30
     drag_termination_start_m = 0.20
     drag_termination_final_m = 0.06
     # Stance starts: this share of resets begin standing in a displaced stance
@@ -175,21 +168,23 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
 
   class constraints(SafeRecoveryCfg.constraints):
     class scales(SafeRecoveryCfg.constraints.scales):
-      target_torso_over_com = 6.0
-      style_feet_distance = -400.0
       # No joint-specific strategy rewards: removed.
       target_loaded_knee_flexion = 0.0
       target_knee_sole_progress = 0.0
+      target_recovery_hip_roll = 0.0
       style_loaded_hip_roll_excess = 0.0
       style_loaded_knee_hyperextension = 0.0
       # HoST's hip-roll deviation limit (1.4 rad one leg / 0.9 both) would cap the
       # widened 120-degree ROM; dropped by request.
       style_hip_roll_deviation = 0.0
+      # Narrower rise without dragging the soles (after model_1100): spread hip
+      # roll and loaded-foot translation cost extra while rising.
+      style_rise_hip_roll = -40.0
+      style_rise_foot_slip = -12.0
       # Pipeline terms (raw scales, multiplied by dt = 0.02 in HoST).
       target_feet_under_com = 3.0
       # Revision 13: planted soles (coverage) and a centred, stable stance.
-      target_sole_contact_coverage = 12.0
-      style_loaded_sole_slip = -12.0
+      target_sole_contact_coverage = 8.0
       style_loaded_sole_coverage_deficit = -10.0
       target_two_foot_flat_support = 6.0
       target_torso_center_over_feet = 4.0

@@ -62,7 +62,7 @@ mesh, and the shin and thigh have no collision at all. Revision 2 therefore also
 |---|---|---|
 | `target_loaded_knee_flexion` | +4 | joint-specific strategy reward |
 | `target_knee_sole_progress` | +6 | knee-flexion reward |
-| `target_recovery_hip_roll` | 0 | hip-roll opening reward; implementation and configuration now deleted |
+| `target_recovery_hip_roll` | 0 | hip-roll opening reward |
 | `style_loaded_hip_roll_excess` | −12 | joint-specific; the hip ROM was widened on purpose |
 | `style_loaded_knee_hyperextension` | −4 | replaced by `style_standing_knee_extension` |
 | `regu_joint_overspeed` | −0.30 | moved to `style_joint_overspeed` |
@@ -130,48 +130,19 @@ mechanically stopped at the straight position before deploying a policy that use
 
 ## Actuation, assets and curricula
 
-- **All-stage sole contact update:** `style_loaded_sole_slip` is now raw scale -12,
-  mean excess tangential contact speed above 0.01 m/s, normalized by 0.10 m/s,
-  averaged only over found sole-ground contacts. No load weighting, uprightness,
-  success, or actuation exemption; an airborne foot is not a slipping contact.
-  `target_sole_contact_coverage` is now +12. Coverage load gate deadband/scale are
-  0.005/0.005 of body weight, rewarding lightly loaded soles rather than requiring
-  about 12.5% body weight per foot. Geometry remains the 3 mm strip-point proxy.
-
-- **Torso near COM (current):** `target_torso_over_com`, raw scale +6. Horizontal
-  distance from the `base_link` origin to whole-body COM, Gaussian sigma 6 cm,
-  multiplied by `clip((upright - 0.65)/0.35, 0, 1)`, `(1 - standing_gate)` and
-  the actuation mask. This rewards upright preparation without requiring foot load;
-  it is not a butt-contact detector or a hard sitting-to-standing curriculum.
-  Maximum target contribution is +0.12 per 20 ms policy step.
-- **Initial external pull:** staged training now starts at 30 N, reducing by 10 N
-  on the inherited curriculum trigger. Resume restores the saved force state;
-  a new default does not override a checkpoint's saved curriculum state.
-
-- **Feet separation penalty (current):** overrides HoST's `style_feet_distance`
-  (binary distance >45 cm, raw scale -10) with raw scale **-400** and
-  `relu((distance - 0.40) / 0.10)`, using the full 3D distance between sole
-  centres. Active after the passive phase, regardless of uprightness or foot load.
-  At dt=0.02, style contributions are 0 at <=40 cm, -4 at 45 cm, -8 at 50 cm,
-  and -16 at 60 cm per policy step. No early termination is added.
-
 - **Motor torque–speed limit:** the PD torque that accelerates a joint in its direction of motion fades
   linearly from the 16/6 Nm limit at 3 rad/s to 0 at 4 rad/s (revision 6; was 4.5 → 6). Braking torque is unaffected.
   - This roughly halves peak joint speed. It is **not** a hard cap: impacts and coupled motion can still
     exceed 6 rad/s, so evaluation reports the actuated peak against 6 rad/s.
-- **Current training asset:** `cl_pai_v2.xml` (SHA256 `0ab0e6c4c799273e9fa17d3346ea4907ff9c6517e52763e737e56f10967c6558`).
-  - All nine extra `_shell_collision` geoms have been removed by request. Original torso/hip/knee/ankle collision geoms and five sole capsules per foot remain. Shell descriptions and ROM sweeps below refer to the historical asset.
-  - Both legs: hip pitch [-2.28, 2.83], thigh yaw [-2.45, 2.45], calf [-2.50, 1.39],
-    ankle pitch [-0.43, 1.30], ankle roll [-0.70, 0.70] rad.
-  - Hip roll: left [-0.13, 2.71], right [-2.71, 0.13] rad.
-  - These limits replace the historical revision-13 ranges described above. Historical
-    ROM sweeps and old checkpoints refer to the previous asset, not this v2 revision.
-  - Historical asset added the leg shells described in revision 2, a torso shell that copies the torso box, and
+- **Asset:** `cl_pai_host_torso_host_legs_hip120_legcoll.xml` (SHA256 `ea7d909d…`).
+  - It is the baseline XML with hip roll widened outward to 2π/3 and the knee range widened to −2.5…1.65
+    (reversible past straight), and thigh yaw toward the other leg capped at 0.28 (from 0.6); hip pitch stays −1.25…1.75 rad.
+  - It adds the leg shells described in revision 2, a torso shell that copies the torso box, and
     hip-motor shells.
   - Bits: left 2/12 (left foot 66/12), right 4/10 (right foot 132/10), torso 8/6, left hip 16/64,
     right hip 32/128.
   - So the shells collide left-vs-right, leg-vs-torso and foot-vs-own-hip only.
-  - On the previous asset, a 1872-pose ROM sweep found no false contact at zero joints or fully adducted legs. The thigh shell
+  - A 1872-pose ROM sweep found no false contact at zero joints or fully adducted legs. The thigh shell
     never reaches the torso inside the ROM; feet and shins reach it only with the knee folded past
     ~0.8 rad and the hip flexed.
 - **Reset:** the same distribution as the baseline. Joints are uniform within absolute half-spans equal
@@ -474,3 +445,15 @@ Changes:
 
 Training resumes from `model_1100` of that run (fallen success 0.95, stance error ~2 cm, no jitter).
 The anchor escalation, step placement reward and 15% stance starts stay.
+
+### After model_1100: narrower rise without sliding (from scratch)
+
+model_1100 (fallen success 1.00 unassisted, 2026-10-15) rises through a wide squat. Its outward hip roll
+peaks at ~1.63 rad. It then closes its loaded legs, sliding the soles ~18 cm per episode at ~0.3 m/s.
+Two terms target the rise only (`rise_gate`: sigmoid of base height around 0.10 m, times
+1 − standing gate):
+
+| Term | Scale | Value |
+|---|---:|---|
+| `style_rise_hip_roll` | −40 | `mean_legs(relu(outward_hip_roll − 0.8)²) · rise_gate` |
+| `style_rise_foot_slip` | −12 | `loaded_foot_translation` cost `· rise_gate`. `loaded_sole_slip` (−6) and `loaded_foot_translation` (−4) stay. |

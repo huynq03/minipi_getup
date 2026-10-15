@@ -51,14 +51,6 @@ def sole_strip_points_world(foot_pos: torch.Tensor, foot_quat: torch.Tensor) -> 
   return foot_pos[:, :, None] + offset.reshape(n, feet, k, 3)
 
 
-def contact_slip_cost(linear, angular, offset, found, threshold, scale):
-  """Mean tangential slip at actual contacts, independent of load or stage."""
-  velocity = linear + torch.cross(angular, offset, dim=-1)
-  excess = torch.relu(torch.linalg.vector_norm(velocity[..., :2], dim=-1) - threshold) / scale
-  touching = (found > 0).to(excess.dtype)
-  return (excess * touching).sum(dim=1) / touching.sum(dim=1).clamp_min(1.0)
-
-
 def geometric_sole_coverage(point_z: torch.Tensor, load_gate: torch.Tensor, tolerance_m: float) -> torch.Tensor:
   """Per-foot sole coverage from geometry: mean over the strip end points of
   exp(-(clearance/tol)^2) (points at or below the ground count fully), times a

@@ -66,4 +66,10 @@ src/minipi_getup/
   getup/getup_env_cfg.py                Generic getup environment factory
   getup/mdp/                            Generic getup actions, events, rewards, terminations
   getup/config/minipi/                  Mini-Pi env config, PPO config, task registration
+  ftsr/                                 FTSR port (docs/FTSR_*.md)
+  host/, host_rl/                       HoST port to mjlab
+  host_safe_recovery/                   HoST recovery base env
+  host_staged_recovery/                 HoST revision 13 (the working policy)
+checkpoints/rev13/model_1100.pt         HoST reference policy
+docs/HOST_REV13.md                      HoST setup, commands, results, lessons
 ```

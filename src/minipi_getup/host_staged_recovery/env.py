@@ -380,14 +380,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     self.step_peak_qd.zero_()  # accumulates over the next step's substeps
 
   # ------------------------------------------------------------------ rewards
-  def _reward_feet_distance(self):
-    """Linear excess above 40 cm, with no upright/contact exemption."""
-    cfg = self.cfg.staged
-    distance = torch.linalg.vector_norm(self.sole_centres[:, 0] - self.sole_centres[:, 1], dim=-1)
-    excess = torch.relu(distance - cfg.feet_distance_max_m) / cfg.feet_distance_excess_scale_m
-    actuated = self.real_episode_length_buf > self.unactuated_time
-    return excess * actuated
-
   def _reward_feet_under_com(self):
     cfg = self.cfg.staged
     return geo.feet_under_com_score(
@@ -439,24 +431,23 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     centred = torch.exp(-(self.torso_lat_err / cfg.torso_center_sigma_m).square())
     return self.support_gate * self.lift_gate * centred
 
-  def _reward_torso_over_com(self):
-    """Upright torso near whole-body COM in XY before standing.
-
-    This shapes preparation; it does not assert that the butt is grounded or
-    open a sitting-to-standing curriculum.
-    """
-    cfg = self.cfg.staged
-    delta = self.root_states[:, :2] - self.com_w[:, :2]
-    centred = torch.exp(-delta.square().sum(dim=-1) / cfg.torso_com_sigma_m**2)
-    upright = ((-self.projected_gravity[:, 2] - cfg.torso_com_upright_min)
-               / (1.0 - cfg.torso_com_upright_min)).clamp(0.0, 1.0)
-    actuated = self.real_episode_length_buf > self.unactuated_time
-    return centred * upright * (1.0 - self._standing_gate()) * actuated
-
   def _reward_com_support_margin(self):
     # Small bonus for the COM inside the two-foot support polygon with margin.
     margin = geo.com_margin_score(self.com_margin, self.cfg.staged.com_margin_full_m)
     return self.support_gate * self.lift_gate * margin
+
+  def _reward_rise_hip_roll(self):
+    # Narrower rise: outward hip roll above the soft angle costs while rising
+    # (rise gate: base above ~0.10 m, not yet standing). model_1100 rose with
+    # ~1.0-1.5 rad on both legs; sitting up and standing stay free.
+    outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor([1.0, -1.0], device=self.device)
+    excess = torch.relu(outward - self.cfg.staged.rise_hip_roll_soft_rad).square().mean(dim=1)
+    return excess * self.rise_gate
+
+  def _reward_rise_foot_slip(self):
+    # Extra loaded-foot translation cost while rising: model_1100 dragged its
+    # soles ~18 cm per episode at ~0.3 m/s closing its spread legs on the way up.
+    return self._reward_loaded_foot_translation() * self.rise_gate
 
   def _reward_stance_width(self):
     cfg = self.cfg.staged
@@ -602,17 +593,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     # Contact sensors here are stepped manually, like host_safe_recovery's own.
     self.leg_contact_sensor.update(self.cfg.sim.dt)
     super()._substep_monitor()
-    # Override the inherited load-weighted slip sample: any sole-ground contact
-    # counts, even during preparation, settle, or a standing step.
-    contact = self.sole_slip_sensor.data
-    indices = self.slip_geom_indices
-    data = self.robot.data
-    cfg = self.cfg.safe_recovery
-    self.slip_cost_history[:, 0] = geo.contact_slip_cost(
-      data.geom_lin_vel_w[:, indices], data.geom_ang_vel_w[:, indices],
-      contact.pos - data.geom_pos_w[:, indices], contact.found,
-      cfg.sole_slip_soft_m_s, cfg.sole_slip_scale_m_s,
-    )
     self.step_peak_qd = torch.maximum(self.step_peak_qd, self.dof_vel.abs())
     actuated = self.real_episode_length_buf > self.unactuated_time
     peak = self.dof_vel.abs().max(dim=1).values * actuated

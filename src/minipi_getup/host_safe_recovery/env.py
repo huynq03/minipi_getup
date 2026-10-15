@@ -213,6 +213,9 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     self.previous_contact_knees = torch.zeros(self.num_envs, 2, device=self.device)
     self.previous_sole_coverage = torch.zeros(self.num_envs, 2, device=self.device)
     self.knee_contact_progress_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self.previous_contact_hip_roll = torch.zeros(self.num_envs, 2, device=self.device)
+    self.previous_hip_sole_coverage = torch.zeros(self.num_envs, 2, device=self.device)
+    self.hip_contact_progress_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
     self.overspeed_peak_by_joint = torch.zeros_like(self.dof_vel)
     self.overspeed_steps_by_joint = torch.zeros_like(self.dof_vel)
     sigma, weight = [], []
@@ -465,6 +468,26 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     gate = elevated + (1.0 - elevated) * lifting
     return load * gate
 
+  def _reward_recovery_hip_roll(self):
+    cfg = self.cfg.safe_recovery
+    # Positive left / negative right roll abducts both legs in this robot.
+    outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor(
+      [1.0, -1.0], device=self.device
+    )
+    coverage = self._sole_coverage()
+    # Reward useful outward movement, not a large held angle. Separate history
+    # from the knee term makes evaluation independent of reward iteration order.
+    score = _knee_sole_progress(
+      outward - self.previous_contact_hip_roll,
+      coverage - self.previous_hip_sole_coverage,
+      cfg.recovery_hip_roll_progress_scale_rad,
+    ).mean(dim=1)
+    reward = score * self.hip_contact_progress_valid * (1.0 - self._standing_gate())
+    self.previous_contact_hip_roll.copy_(outward)
+    self.previous_hip_sole_coverage.copy_(coverage)
+    self.hip_contact_progress_valid.fill_(True)
+    return reward
+
   def _reward_loaded_hip_roll_excess(self):
     outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor(
       [1.0, -1.0], device=self.device
@@ -702,6 +725,7 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     super().reset_idx(env_ids)
     if len(env_ids):
       self.knee_contact_progress_valid[env_ids] = False
+      self.hip_contact_progress_valid[env_ids] = False
       self.penalty_stand_hold[env_ids] = 0
       self.penalty_stand_window[env_ids] = 0
       self.penalty_stood_on_feet[env_ids] = False
