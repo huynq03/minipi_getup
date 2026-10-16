@@ -27,6 +27,11 @@ Verified on Ubuntu 22.04, RTX 3070 Ti 8 GB, driver 580. 1024 envs fit in 8 GB; 4
 ## Train, resume, watch, evaluate
 
 ```bash
+scripts/play.sh [CHECKPOINT] [-n robots] [-p port]      # viewer; default checkpoint model_1100, its action scale
+scripts/play_export_onnx.sh [CHECKPOINT] [...]          # export <ckpt dir>/onnx/<stem>.onnx (+ .json), then play
+```
+
+```bash
 # from scratch (refuses uncommitted package changes unless --allow-dirty)
 python -m minipi_getup.host_staged_recovery.train --num-envs 1024 --max-iterations 8000 --run-name NAME
 # resume: policy, optimizer and curriculum state; --max-iterations is added to the checkpoint's
@@ -74,16 +79,56 @@ How it gets up, from 40 recorded episodes:
 - **Side and intermediate:** it rotates upright on wide hip roll (1.1–1.6 rad); 43 % pass briefly
   through chest-down.
 
-## After model_1100: narrower rise without sliding
+## After model_1100: prone get-up only, no sliding, action scale 0.40
 
-Two terms are active only while rising (`rise_gate`: base above ~0.10 m, not yet standing):
+> **Code state (2026-10-16):** the training code is back at commit `2050c04` (rev13, action-scale floor
+> 0.25). That commit trained `getup_2600` (ONNX md5 `ffcc3285…`), which ran best on the robot at scale
+> 0.4. The experiments below are kept in `git stash` ("wip 2026-10-15 …"): prone-only, floor 0.40,
+> friction, rise no-slip, knee 0.10, and an EMA change that collapses training. Their checkpoints and
+> ONNX files (`model_4000`, ft2600) were trained with that stashed code. `export_onnx.py` and `scripts/`
+> stay.
 
-- `style_rise_hip_roll = -40`: squared outward hip roll above 0.8 rad.
-- `style_rise_foot_slip = -12`: loaded-foot translation (the `loaded_foot_translation` cost) on top of
-  the existing `loaded_sole_slip` (-6) and `loaded_foot_translation` (-4).
+Training from scratch on 2026-10-15 (run `rev13_prone_only_scratch`, 1024 envs, 8000 iterations):
 
-Training from scratch with them started on 2026-10-15 (1024 envs, 8000 iterations, ~7.5 h).
-Compare it against the table above.
+- **Prone resets only** (`safe_recovery.reset_classes = ("prone",)`), plus the 15 % stance starts. The
+  goal is model_1100's knee-supported prone get-up at the lower scale. `evaluate --classes` picks the
+  evaluated falls (default: all five).
+- **`style_rise_foot_slip = -12`**: loaded-foot translation cost while rising (`rise_gate`: base above
+  ~0.10 m, not yet standing), on top of `loaded_sole_slip` (-6) and `loaded_foot_translation` (-4).
+- **`action_scale_floor = 0.40`**: the intended deployment scale.
+- **Resumed at iteration 2800** (run `rev13_prone_only_r2800`, +2500 iterations), after a plateau from
+  ~2000. The velocity termination had settled at ~10.4 rad/s and cut 26 % of episodes. That held
+  training success at ~0.69 and the penalty curriculum at 0.22 strength. model_2200 (evaluated unassisted,
+  prone) was faster than model_1100 (1.06 s p50) but slid more while rising (35 vs 24 cm), stood on a
+  straight right knee every time, and peaked at 11 rad/s. Changes: `velocity_termination = False`,
+  `style_joint_overspeed` -2 → -4, `style_standing_knee_extension` -16 → -48.
+- **Result of the resume (to 5300):** training success 0.97, but the targets did not move. Rise sliding
+  stayed at ~33 cm and joint speed rose to ~10.8 rad/s p95. The knee settled just past the -0.25
+  deadband, where the cost is ~0. The ~+60/s task reward dwarfs the -0.7/s slip cost. Best checkpoint:
+  `model_4000` (copied with its ONNX to `checkpoints/rev13_prone_only/`).
+- **Fine-tune of model_1100** (run `rev13_m1100_prone_s040`, from 1100 to 2600): prone resets, action-scale
+  floor 0.40, `style_rise_foot_slip = -12`, everything else as rev13 (velocity termination on, knee -16,
+  overspeed -2).
+- **Fine-tune result (`checkpoints/rev13_m1100_finetune/model_2600.pt` + ONNX, scale 0.40):** prone,
+  unassisted: 1.28 / 1.40 s to stand, 23 cm rise sliding, joint speed 7.0 / 8.0 rad/s p50 / p95
+  (model_1100: 8.4 / 9.8). The knee ended straighter (calf -0.26). Overspeed terminations (~23 %)
+  held the penalty curriculum at 0.52.
+- **Fine-tune of ft2600** (run `rev13_ft2600_fric_noslip`, 2600 to 3600):
+  - Friction 0.8-1.2 effective (`domain_rand.friction_range = [0.85, 1.65]`, evaluation 1.0 via
+    `nominal_friction = 1.25`).
+  - `task_rise_no_slip`: exp(-0.5 x loaded-foot translation x rise_gate) multiplies the task product.
+  - Penalty EMA ignores overspeed terminations.
+  - Knee deadband 0.25 -> 0.10.
+  - Friction alone barely helps: ft2600 at 1.0 still slides 21 cm (35 cm p95). The sliding is
+    commanded, not a lack of grip.
+- **Hip roll free.** A run that penalised outward hip roll above 0.8 rad while rising (-40) kept the hips
+  closed while kneeling (the gate is already 27-73 % open at 0.07-0.12 m). Without a wide leg to brace
+  on, prone get-ups fell forward and retried: 2.40 s p50 / 4.46 s p95 at iteration 1400 versus 1.26 /
+  1.45 s for model_1100.
+- **Prone first from every fall (dropped).** Zero task reward until the torso had been chest-down, with a
+  chest-down score as the only target reward. In 400 iterations supine starts never rolled over: the
+  chest-down fraction stayed at ~0.6 and mean reward flat at ~-650, while the pull force still lifted
+  ~17 % of episodes upright without the route.
 
 ## Discarded attempts (code and logs removed)
 

@@ -436,19 +436,6 @@ class StagedRecoveryEnv(SafeRecoveryEnv):
     margin = geo.com_margin_score(self.com_margin, self.cfg.staged.com_margin_full_m)
     return self.support_gate * self.lift_gate * margin
 
-  def _reward_rise_hip_roll(self):
-    # Narrower rise: outward hip roll above the soft angle costs while rising
-    # (rise gate: base above ~0.10 m, not yet standing). model_1100 rose with
-    # ~1.0-1.5 rad on both legs; sitting up and standing stay free.
-    outward = self.dof_pos[:, self.recovery_hip_roll_indices] * torch.tensor([1.0, -1.0], device=self.device)
-    excess = torch.relu(outward - self.cfg.staged.rise_hip_roll_soft_rad).square().mean(dim=1)
-    return excess * self.rise_gate
-
-  def _reward_rise_foot_slip(self):
-    # Extra loaded-foot translation cost while rising: model_1100 dragged its
-    # soles ~18 cm per episode at ~0.3 m/s closing its spread legs on the way up.
-    return self._reward_loaded_foot_translation() * self.rise_gate
-
   def _reward_stance_width(self):
     cfg = self.cfg.staged
     left, right, _ = self._normalized_supports()

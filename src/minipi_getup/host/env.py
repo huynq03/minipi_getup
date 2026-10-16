@@ -564,15 +564,19 @@ class LeggedRobot_Pi:
       [int(g) for g in robot_geoms.tolist() if self.sim.mj_model.geom_contype[g]],
       device=self.device,
     )
+    # PORT: friction_is_contact (not in the release) samples the contact friction itself
+    # instead of a robot coefficient averaged with the ground's; evaluation keeps 0.65.
+    direct = getattr(dr, "friction_is_contact", False)
+    nominal_mu = 0.5 * (NOMINAL_ROBOT_FRICTION + GROUND_FRICTION_MEAN)
     if dr.randomize_friction:
       self.friction_coeffs = torch_rand_float(
         dr.friction_range[0], dr.friction_range[1], (N, 1), self.device
       )
     else:
       self.friction_coeffs = torch.full(
-        (N, 1), NOMINAL_ROBOT_FRICTION, device=self.device
+        (N, 1), nominal_mu if direct else NOMINAL_ROBOT_FRICTION, device=self.device
       )
-    mu = 0.5 * (self.friction_coeffs + GROUND_FRICTION_MEAN)
+    mu = self.friction_coeffs if direct else 0.5 * (self.friction_coeffs + GROUND_FRICTION_MEAN)
     model.geom_friction[:, col, 0] = mu.expand(N, len(col))
     if dr.randomize_restitution:
       # No MuJoCo counterpart (contacts are not restitution-based); sampled for parity.

@@ -445,15 +445,3 @@ Changes:
 
 Training resumes from `model_1100` of that run (fallen success 0.95, stance error ~2 cm, no jitter).
 The anchor escalation, step placement reward and 15% stance starts stay.
-
-### After model_1100: narrower rise without sliding (from scratch)
-
-model_1100 (fallen success 1.00 unassisted, 2026-10-15) rises through a wide squat. Its outward hip roll
-peaks at ~1.63 rad. It then closes its loaded legs, sliding the soles ~18 cm per episode at ~0.3 m/s.
-Two terms target the rise only (`rise_gate`: sigmoid of base height around 0.10 m, times
-1 − standing gate):
-
-| Term | Scale | Value |
-|---|---:|---|
-| `style_rise_hip_roll` | −40 | `mean_legs(relu(outward_hip_roll − 0.8)²) · rise_gate` |
-| `style_rise_foot_slip` | −12 | `loaded_foot_translation` cost `· rise_gate`. `loaded_sole_slip` (−6) and `loaded_foot_translation` (−4) stay. |

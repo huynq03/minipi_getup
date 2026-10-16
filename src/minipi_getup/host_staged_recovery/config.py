@@ -15,6 +15,12 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # Overspeed cost starts here (was 4): slow, deliberate motion.
     overspeed_soft_rad_s = 3.0
 
+  class domain_rand(SafeRecoveryCfg.domain_rand):
+    # Contact friction sampled directly (not averaged with the 0.75 ground): 0.1-1.25
+    # (was 0.425-0.875), so the policy cannot rely on grip to get up. Evaluation: 0.65.
+    friction_is_contact = True
+    friction_range = [0.1, 1.25]
+
   class staged:
     # Motor torque-speed limit (accelerating torque fades to 0 at the max speed).
     # 4 rad/s (was 6): leaves a 2 rad/s margin below the 6 rad/s hardware limit.
@@ -50,8 +56,6 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     stance_cost_cap = 4.0
     # Stance cost while rising (not yet standing), as a fraction of the standing cost.
     stance_rise_fraction = 0.25
-    # Narrower rise (after model_1100): outward hip roll above this costs while rising.
-    rise_hip_roll_soft_rad = 0.8
     # Standing load split; the floor keeps the ratio finite while unloaded.
     load_imbalance_floor_weight_fraction = 0.1
     # Leg-on-leg contact: 0.5% W deadband, saturating with a 5% W scale (~3.4 N).
@@ -98,9 +102,8 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # run 20261013_123752 it ended 40-70% of episodes once active (iteration ~1200),
     # before the policy could step, and fallen-start success fell from 0.95 to 0.06.
     drag_termination = False
-    # Action-scale curriculum floor: the inherited schedule goes down to 0.25 on
-    # head height alone; at 0.24 the same run could no longer get up or step.
-    action_scale_floor = 0.30
+    # Action-scale curriculum floor lowered to 0.25 at the user's request.
+    action_scale_floor = 0.25
     drag_termination_start_m = 0.20
     drag_termination_final_m = 0.06
     # Stance starts: this share of resets begin standing in a displaced stance
@@ -177,10 +180,6 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
       # HoST's hip-roll deviation limit (1.4 rad one leg / 0.9 both) would cap the
       # widened 120-degree ROM; dropped by request.
       style_hip_roll_deviation = 0.0
-      # Narrower rise without dragging the soles (after model_1100): spread hip
-      # roll and loaded-foot translation cost extra while rising.
-      style_rise_hip_roll = -40.0
-      style_rise_foot_slip = -12.0
       # Pipeline terms (raw scales, multiplied by dt = 0.02 in HoST).
       target_feet_under_com = 3.0
       # Revision 13: planted soles (coverage) and a centred, stable stance.
