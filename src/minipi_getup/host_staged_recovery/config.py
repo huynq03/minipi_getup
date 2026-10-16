@@ -24,6 +24,10 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     # threshold (0.37 m) for 2300 iterations. Evaluation: 0.65.
     friction_is_contact = True
     friction_range = [0.3, 1.0]
+    # Knee and shin geoms (calf links) at 0.1 in training and evaluation, so the policy
+    # cannot push off the floor through knee friction.
+    low_friction_bodies = ("l_calf_link", "r_calf_link")
+    low_friction_value = 0.1
 
   class staged:
     # Motor torque-speed limit (accelerating torque fades to 0 at the max speed).

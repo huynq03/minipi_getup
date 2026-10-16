@@ -578,6 +578,15 @@ class LeggedRobot_Pi:
       )
     mu = self.friction_coeffs if direct else 0.5 * (self.friction_coeffs + GROUND_FRICTION_MEAN)
     model.geom_friction[:, col, 0] = mu.expand(N, len(col))
+    # PORT: low_friction_bodies (not in the release): fixed friction on these bodies'
+    # collision geoms (train and evaluation), e.g. knees the policy should not grip with.
+    low = getattr(dr, "low_friction_bodies", ())
+    if low:
+      mj = self.sim.mj_model
+      ids = [int(g) for g in col.tolist() if mj.body(int(mj.geom_bodyid[g])).name.split("/")[-1] in low]
+      assert len(ids) > 0, f"no collision geoms on {low}"
+      model.geom_friction[:, torch.tensor(ids, device=self.device), 0] = dr.low_friction_value
+      self.low_friction_geom_ids = ids
     if dr.randomize_restitution:
       # No MuJoCo counterpart (contacts are not restitution-based); sampled for parity.
       self.restitution_coeffs = torch_rand_float(
