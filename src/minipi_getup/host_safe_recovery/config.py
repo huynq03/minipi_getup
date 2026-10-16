@@ -18,6 +18,11 @@ class SafeRecoveryCfg(PiCfg):
     force = 40
 
   class safe_recovery:
+    # Fall classes sampled uniformly at reset (names from env.RESET_CLASSES).
+    reset_classes = ("supine", "prone", "left", "right", "intermediate")
+    # Extra torso tilt of the named falls about the world lateral axis (head up or
+    # down), |angle| uniform in this range with a random sign; (0, 0) = lying flat.
+    reset_tilt_abs_range_rad = (0.0, 0.0)
     overspeed_soft_rad_s = 4.0
     evaluation_ceiling_rad_s = 5.0
     # Smooth gate begins providing posture/stability gradients before final standing.

@@ -14,12 +14,16 @@ class StagedRecoveryCfg(SafeRecoveryCfg):
     evaluation_ceiling_rad_s = 6.0
     # Overspeed cost starts here (was 4): slow, deliberate motion.
     overspeed_soft_rad_s = 3.0
+    # Prone resets only, torso tilted 10-35 deg head up or down (not lying flat).
+    reset_classes = ("prone",)
+    reset_tilt_abs_range_rad = (0.17, 0.61)
 
   class domain_rand(SafeRecoveryCfg.domain_rand):
-    # Contact friction sampled directly (not averaged with the 0.75 ground): 0.1-1.25
-    # (was 0.425-0.875), so the policy cannot rely on grip to get up. Evaluation: 0.65.
+    # Contact friction sampled directly (not averaged with the 0.75 ground): 0.3-1.0
+    # (2050c04: 0.425-0.875). 0.1-1.25 kept the head below the force-curriculum
+    # threshold (0.37 m) for 2300 iterations. Evaluation: 0.65.
     friction_is_contact = True
-    friction_range = [0.1, 1.25]
+    friction_range = [0.3, 1.0]
 
   class staged:
     # Motor torque-speed limit (accelerating torque fades to 0 at the max speed).

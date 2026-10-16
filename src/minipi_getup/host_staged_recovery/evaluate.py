@@ -27,7 +27,7 @@ STAGE = StagedRecoveryCfg.staged
 
 
 def build(variant: str, action_scale: float, episode_s: float, num_envs: int, device: str,
-          asset: str = "native"):
+          asset: str = "native", classes: tuple[str, ...] = RESET_CLASSES):
   """Returns (env, variant name, checkpoint asset hash to verify, PPO cfg, asset hash in use).
 
   asset="staged" runs a host_safe_recovery policy on the staged asset (leg/torso
@@ -58,6 +58,7 @@ def build(variant: str, action_scale: float, episode_s: float, num_envs: int, de
   else:
     configure_asset()
     used_sha = trained_sha
+  cfg.safe_recovery.reset_classes = classes  # all fall classes unless asked otherwise
   cfg.noise.add_noise = False
   cfg.env.episode_length_s = episode_s
   cfg.control.action_scale = action_scale
@@ -97,7 +98,9 @@ def rollout(args) -> dict:
   torch.manual_seed(args.seed)
   np.random.seed(args.seed)
   dev = args.device
-  env, name, sha, ppo, used_sha = build(args.variant, args.action_scale, args.episode_s, args.num_envs, dev, args.asset)
+  env, name, sha, ppo, used_sha = build(
+    args.variant, args.action_scale, args.episode_s, args.num_envs, dev, args.asset, tuple(args.classes)
+  )
   actor = load_actor(args.checkpoint, env, name, sha, ppo, dev)
   n = env.num_envs
   weight = env.sim.model.body_mass[:, env.robot.indexing.body_ids.long()].sum(1) * 9.81
@@ -263,7 +266,7 @@ def rollout(args) -> dict:
                  "pull_force": False, "observation_noise": False, "action_scale": args.action_scale,
                  "episode_s": args.episode_s, "velocity_ceiling_rad_s": ceiling},
     "overall": summarize(torch.ones_like(cat["success"])),
-    "per_orientation": {c: summarize(cat["class"] == i) for i, c in enumerate(RESET_CLASSES)},
+    "per_orientation": {c: summarize(cat["class"] == i) for i, c in enumerate(RESET_CLASSES) if c in args.classes},
     "per_joint_peak_velocity_rad_s": dict(zip(env.dof_names, cat["peak_qd_joint"].max(0).values.tolist(), strict=True)),
     "per_joint_peak_torque_nm": dict(zip(env.dof_names, cat["peak_tau_joint"].max(0).values.tolist(), strict=True)),
   }
@@ -298,6 +301,8 @@ def main() -> None:
   p.add_argument("--seed", type=int, default=20261012)
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--save-traj", type=int, default=0, help="save qpos of the first N envs")
+  p.add_argument("--classes", nargs="+", choices=RESET_CLASSES, default=list(RESET_CLASSES),
+                 help="fall classes to sample (default: all, whatever the training config uses)")
   p.add_argument("--out", type=Path, required=True)
   args = p.parse_args()
   result = rollout(args)

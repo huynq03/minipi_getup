@@ -295,7 +295,9 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
   def _reset_root_states(self, env_ids):
     """Uniform mixture of four named falls plus random intermediate tilts."""
     n = len(env_ids)
-    cls = torch.randint(0, len(RESET_CLASSES), (n,), device=self.device)
+    sr = self.cfg.safe_recovery
+    allowed = torch.tensor([RESET_CLASSES.index(c) for c in sr.reset_classes], device=self.device)
+    cls = allowed[torch.randint(0, len(allowed), (n,), device=self.device)]
     self.reset_class[env_ids] = cls
     q = torch.zeros(n, 4, device=self.device)
     h = math.sqrt(0.5)
@@ -306,6 +308,15 @@ class SafeRecoveryEnv(LeggedRobot_Pi):
     for k in range(4):
       mask = cls == k
       q[mask] = canonical[k]
+    lo, hi = sr.reset_tilt_abs_range_rad
+    if hi > 0:
+      # Pre-rotate the named falls about world y: torso no longer parallel to the floor.
+      tilt = torch_rand_float(lo, hi, (n,), self.device)
+      tilt *= torch.where(torch.rand(n, device=self.device) < 0.5, -1.0, 1.0)
+      qtilt = torch.zeros_like(q)
+      qtilt[:, 0], qtilt[:, 2] = torch.cos(0.5 * tilt), torch.sin(0.5 * tilt)
+      named = cls < 4
+      q[named] = _quat_mul(qtilt[named], q[named])
     mask = cls == 4
     count = int(mask.sum())
     if count:
