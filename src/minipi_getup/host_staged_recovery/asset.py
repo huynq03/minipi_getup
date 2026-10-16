@@ -17,6 +17,8 @@ foot/shin pass into the torso.
 
 thigh2 (2026-10-16): thigh yaw -2..2 rad on both legs (was -0.28..0.30 right, -0.30..0.28
 left; thigh1 = -1..1). The leg shells now stop the feet from crossing, and the HoST URDF allows +-3 rad.
+mass8 (2026-10-16): base_link 2.1609 -> 3.2212 kg (inertia scaled by the same ratio, COM kept),
+so the robot weighs 8.00 kg instead of 6.94.
 Otherwise identical to cl_pai_host_torso_host_legs_hip120_legcoll.xml (sha256
 ea7d909d...), which model_1100 / getup_2600 / ft2600 were trained on.
 """
@@ -32,9 +34,9 @@ from minipi_getup.host_safe_recovery import asset as safe_asset
 # Package-relative, so a fresh clone of this branch finds it.
 ASSET_XML = (
   Path(__file__).resolve().parents[1]
-  / "asset_zoo/robots/hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_thigh2_legcoll.xml"
+  / "asset_zoo/robots/hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_thigh2_mass8_legcoll.xml"
 )
-EXPECTED_ASSET_SHA256 = "5b4f3ad3b372bb3c8b97e59ea4d38ceced3a28e1c91747ebb484bad64ad87fec"
+EXPECTED_ASSET_SHA256 = "926b83f1abc4f98695b0db5b3fa1e68b254987d3c2d4295e583ab851a7e46de8"
 
 
 def asset_sha256() -> str:
