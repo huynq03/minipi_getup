@@ -15,8 +15,8 @@ same-leg contact). Without them the baseline collision model let the two feet
 overlap by up to ~2 cm, the shins/thighs pass through each other, and a folded
 foot/shin pass into the torso.
 
-thigh1 (2026-10-16): thigh yaw -1..1 rad on both legs (was -0.28..0.30 right, -0.30..0.28
-left). The leg shells now stop the feet from crossing, and the HoST URDF allows +-3 rad.
+thigh2 (2026-10-16): thigh yaw -2..2 rad on both legs (was -0.28..0.30 right, -0.30..0.28
+left; thigh1 = -1..1). The leg shells now stop the feet from crossing, and the HoST URDF allows +-3 rad.
 Otherwise identical to cl_pai_host_torso_host_legs_hip120_legcoll.xml (sha256
 ea7d909d...), which model_1100 / getup_2600 / ft2600 were trained on.
 """
@@ -32,9 +32,9 @@ from minipi_getup.host_safe_recovery import asset as safe_asset
 # Package-relative, so a fresh clone of this branch finds it.
 ASSET_XML = (
   Path(__file__).resolve().parents[1]
-  / "asset_zoo/robots/hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_thigh1_legcoll.xml"
+  / "asset_zoo/robots/hightorque_minipi/xmls/cl_pai_host_torso_host_legs_hip120_thigh2_legcoll.xml"
 )
-EXPECTED_ASSET_SHA256 = "7bf7d894bda3831db43e5d14bc9006412c2802afb9e3bc3c2b9b87f673562a4c"
+EXPECTED_ASSET_SHA256 = "5b4f3ad3b372bb3c8b97e59ea4d38ceced3a28e1c91747ebb484bad64ad87fec"
 
 
 def asset_sha256() -> str:
