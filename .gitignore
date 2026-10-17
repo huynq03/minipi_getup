@@ -16,9 +16,15 @@ MUJOCO_LOG.TXT
 wandb/
 *.pt
 *.onnx
+# Evaluation results and ONNX metadata (regenerate with evaluate / export_onnx)
+eval/
+*.npz
+checkpoints/**/onnx/
 
-scripts/
 
 # Tools
 .ruff_cache/
 .warp-cache-cu12/
+.uv-cache/
+.uv-python/
+.cache/
